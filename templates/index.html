@@ -1,0 +1,2261 @@
+<!DOCTYPE html>
+<html lang="en">
+
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Trigun Robotics — Drone ATC</title>
+  <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" />
+  <link
+    href="https://fonts.googleapis.com/css2?family=Rajdhani:wght@400;500;600;700&family=Source+Sans+3:wght@300;400;500;600&family=JetBrains+Mono:wght@400;500&display=swap"
+    rel="stylesheet">
+  <style>
+    * {
+      box-sizing: border-box;
+      margin: 0;
+      padding: 0
+    }
+
+    :root {
+      --accent: #6366f1;
+      --accent2: #10b981;
+      --warn: #f43f5e;
+      --orange: #f59e0b;
+      --blue: #38bdf8;
+      --lg-blur: blur(32px) saturate(200%) brightness(1.05);
+      --lg-shadow: 0 8px 32px rgba(99, 102, 241, 0.18), 0 2px 8px rgba(56, 189, 248, 0.12);
+      --lg-inset: inset 0 1px 0 rgba(255, 255, 255, 0.7), inset 0 -1px 0 rgba(99, 102, 241, 0.1);
+      --font: 'Source Sans 3', sans-serif;
+      --display: 'Rajdhani', sans-serif;
+      --mono: 'JetBrains Mono', monospace;
+    }
+
+    html,
+    body {
+      width: 100%;
+      height: 100%;
+      overflow: hidden;
+      font-family: var(--font);
+      background: linear-gradient(135deg, #0f0c29 0%, #302b63 35%, #24243e 65%, #0f0c29 100%) fixed
+    }
+
+    html::before {
+      content: '';
+      position: fixed;
+      inset: 0;
+      z-index: 0;
+      pointer-events: none;
+      background: radial-gradient(ellipse 80% 60% at 10% 20%, rgba(139, 92, 246, .25), transparent 65%),
+        radial-gradient(ellipse 60% 70% at 90% 80%, rgba(56, 189, 248, .2), transparent 65%),
+        radial-gradient(ellipse 50% 40% at 55% 50%, rgba(16, 185, 129, .12), transparent 55%)
+    }
+
+    /* ALARM OVERLAY */
+    #alarm-flash {
+      position: fixed;
+      inset: 0;
+      z-index: 99998;
+      pointer-events: none
+    }
+
+    #alarm-flash.active {
+      animation: alarmFlash 1s infinite
+    }
+
+    @keyframes alarmFlash {
+
+      0%,
+      100% {
+        background: rgba(244, 63, 94, 0)
+      }
+
+      50% {
+        background: rgba(244, 63, 94, .08)
+      }
+    }
+
+    #alarm-flash.active::before {
+      content: '⚠ BREACH ALARM';
+      position: fixed;
+      top: 0;
+      left: 0;
+      right: 0;
+      padding: 5px;
+      text-align: center;
+      font-family: var(--display);
+      font-weight: 700;
+      font-size: 11px;
+      letter-spacing: 3px;
+      color: #f87171;
+      background: rgba(244, 63, 94, .22);
+      backdrop-filter: blur(8px);
+      border-bottom: 1px solid rgba(244, 63, 94, .4);
+      animation: alarmTxt 1s infinite;
+      z-index: 99999
+    }
+
+    @keyframes alarmTxt {
+
+      0%,
+      100% {
+        opacity: .5
+      }
+
+      50% {
+        opacity: 1
+      }
+    }
+
+    /* LOGO */
+    #head-logo {
+      width: 38px;
+      height: 38px;
+      border-radius: 11px;
+      object-fit: contain;
+      flex-shrink: 0;
+      border: 1px solid rgba(255, 255, 255, .2);
+      box-shadow: 0 4px 16px rgba(99, 102, 241, .45)
+    }
+
+    #head-logo-fb {
+      width: 38px;
+      height: 38px;
+      border-radius: 11px;
+      flex-shrink: 0;
+      display: none;
+      background: linear-gradient(145deg, rgba(99, 102, 241, .5), rgba(56, 189, 248, .4));
+      backdrop-filter: blur(10px);
+      border-top: 1px solid rgba(255, 255, 255, .5);
+      border-left: 1px solid rgba(255, 255, 255, .3);
+      align-items: center;
+      justify-content: center;
+      font-family: var(--display);
+      font-weight: 700;
+      color: rgba(255, 255, 255, .95);
+      font-size: 11px;
+      box-shadow: 0 4px 16px rgba(99, 102, 241, .45), inset 0 1px 0 rgba(255, 255, 255, .4)
+    }
+
+    /* ALARM BTN */
+    .head-btn-alarm {
+      padding: 5px 11px;
+      border-radius: 9px;
+      font-family: var(--display);
+      font-weight: 700;
+      font-size: 10px;
+      letter-spacing: .5px;
+      cursor: pointer;
+      background: rgba(16, 185, 129, .15);
+      backdrop-filter: blur(10px);
+      color: #34d399;
+      border: 1px solid rgba(16, 185, 129, .35);
+      box-shadow: 0 2px 8px rgba(16, 185, 129, .2);
+      transition: all .15s
+    }
+
+    .head-btn-alarm:hover {
+      background: rgba(16, 185, 129, .28)
+    }
+
+    .head-btn-alarm.muted {
+      background: rgba(255, 255, 255, .06);
+      color: rgba(255, 255, 255, .35);
+      border-color: rgba(255, 255, 255, .12);
+      box-shadow: none
+    }
+
+    .head-btn-alarm.alarming {
+      background: rgba(244, 63, 94, .2);
+      color: #f87171;
+      border-color: rgba(244, 63, 94, .45);
+      animation: alarmBtnPulse 1s infinite
+    }
+
+    @keyframes alarmBtnPulse {
+
+      0%,
+      100% {
+        box-shadow: 0 2px 8px rgba(244, 63, 94, .2)
+      }
+
+      50% {
+        box-shadow: 0 2px 16px rgba(244, 63, 94, .5)
+      }
+    }
+
+    /* LOGIN */
+    #login-wrap {
+      position: fixed;
+      inset: 0;
+      z-index: 9999;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      overflow: auto
+    }
+
+    #login-wrap::before {
+      content: '';
+      position: absolute;
+      inset: 0;
+      background: linear-gradient(135deg, #0f0c29 0%, #302b63 40%, #1a0533 70%, #0f0c29 100%);
+      z-index: 0
+    }
+
+    #login-wrap::after {
+      content: '';
+      position: absolute;
+      inset: 0;
+      z-index: 0;
+      pointer-events: none;
+      background: radial-gradient(ellipse 70% 60% at 20% 30%, rgba(139, 92, 246, .3), transparent 65%),
+        radial-gradient(ellipse 55% 65% at 80% 70%, rgba(56, 189, 248, .25), transparent 65%)
+    }
+
+    #login-wrap.hide {
+      display: none
+    }
+
+    .login-card {
+      position: relative;
+      width: 100%;
+      max-width: 420px;
+      z-index: 1;
+      background: linear-gradient(145deg, rgba(255, 255, 255, .2) 0%, rgba(255, 255, 255, .08) 50%, rgba(99, 102, 241, .1) 100%);
+      backdrop-filter: blur(40px) saturate(200%) brightness(1.1);
+      border-radius: 24px;
+      padding: 40px 38px;
+      border-top: 1px solid rgba(255, 255, 255, .6);
+      border-left: 1px solid rgba(255, 255, 255, .4);
+      border-right: 1px solid rgba(255, 255, 255, .15);
+      border-bottom: 1px solid rgba(255, 255, 255, .12);
+      box-shadow: 0 32px 80px rgba(0, 0, 0, .5), 0 8px 32px rgba(99, 102, 241, .3), inset 0 1px 0 rgba(255, 255, 255, .7);
+      overflow: hidden
+    }
+
+    .login-card::before {
+      content: '';
+      position: absolute;
+      top: 0;
+      left: 0;
+      right: 0;
+      height: 45%;
+      background: linear-gradient(180deg, rgba(255, 255, 255, .2) 0%, transparent 100%);
+      pointer-events: none;
+      z-index: 0
+    }
+
+    .login-card>* {
+      position: relative;
+      z-index: 1
+    }
+
+    .login-logo-row {
+      display: flex;
+      align-items: center;
+      gap: 14px;
+      justify-content: center;
+      margin-bottom: 24px
+    }
+
+    .login-logo-img {
+      width: 60px;
+      height: 60px;
+      border-radius: 16px;
+      object-fit: contain;
+      border: 1px solid rgba(255, 255, 255, .3);
+      box-shadow: 0 8px 24px rgba(99, 102, 241, .5)
+    }
+
+    .login-logo-fb {
+      width: 60px;
+      height: 60px;
+      border-radius: 16px;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      background: linear-gradient(145deg, rgba(99, 102, 241, .6), rgba(56, 189, 248, .5));
+      border-top: 1px solid rgba(255, 255, 255, .6);
+      border-left: 1px solid rgba(255, 255, 255, .4);
+      font-family: var(--display);
+      font-weight: 700;
+      color: rgba(255, 255, 255, .95);
+      font-size: 13px;
+      letter-spacing: 1px;
+      box-shadow: 0 8px 24px rgba(99, 102, 241, .5), inset 0 1px 0 rgba(255, 255, 255, .5)
+    }
+
+    .login-title {
+      font-family: var(--display);
+      font-size: 20px;
+      font-weight: 700;
+      color: rgba(255, 255, 255, .92);
+      line-height: 1.2
+    }
+
+    .login-sub {
+      font-size: 10px;
+      color: rgba(255, 255, 255, .45);
+      letter-spacing: .5px;
+      margin-top: 3px
+    }
+
+    .tab-row {
+      display: flex;
+      margin-bottom: 24px;
+      background: rgba(0, 0, 0, .2);
+      border: 1px solid rgba(255, 255, 255, .15);
+      border-radius: 12px;
+      padding: 3px;
+      box-shadow: inset 0 2px 8px rgba(0, 0, 0, .3)
+    }
+
+    .tab-btn {
+      flex: 1;
+      padding: 8px;
+      font-family: var(--display);
+      font-weight: 700;
+      font-size: 12px;
+      letter-spacing: .8px;
+      border: none;
+      background: transparent;
+      cursor: pointer;
+      color: rgba(255, 255, 255, .35);
+      border-radius: 9px;
+      transition: all .2s
+    }
+
+    .tab-btn.active {
+      background: linear-gradient(135deg, rgba(255, 255, 255, .2), rgba(255, 255, 255, .08));
+      color: rgba(255, 255, 255, .9);
+      border-top: 1px solid rgba(255, 255, 255, .5);
+      border-left: 1px solid rgba(255, 255, 255, .3);
+      box-shadow: 0 4px 12px rgba(0, 0, 0, .3), inset 0 1px 0 rgba(255, 255, 255, .4)
+    }
+
+    .form-group {
+      margin-bottom: 14px
+    }
+
+    .form-label {
+      font-size: 10px;
+      font-weight: 600;
+      color: rgba(255, 255, 255, .5);
+      letter-spacing: .8px;
+      text-transform: uppercase;
+      display: block;
+      margin-bottom: 4px
+    }
+
+    .form-input {
+      width: 100%;
+      padding: 10px 13px;
+      background: rgba(0, 0, 0, .2);
+      backdrop-filter: blur(10px);
+      border: 1px solid rgba(255, 255, 255, .2);
+      border-radius: 10px;
+      font-family: var(--font);
+      font-size: 13px;
+      color: rgba(255, 255, 255, .9);
+      box-shadow: inset 0 2px 6px rgba(0, 0, 0, .2);
+      outline: none;
+      transition: all .2s
+    }
+
+    .form-input:focus {
+      background: rgba(255, 255, 255, .1);
+      border-color: rgba(99, 102, 241, .6);
+      box-shadow: inset 0 2px 6px rgba(0, 0, 0, .15), 0 0 0 3px rgba(99, 102, 241, .2)
+    }
+
+    .form-input::placeholder {
+      color: rgba(255, 255, 255, .25)
+    }
+
+    .btn-primary {
+      width: 100%;
+      padding: 12px;
+      margin-top: 4px;
+      background: linear-gradient(135deg, rgba(99, 102, 241, .6), rgba(56, 189, 248, .5));
+      color: rgba(255, 255, 255, .95);
+      border-top: 1px solid rgba(255, 255, 255, .45);
+      border-left: 1px solid rgba(255, 255, 255, .3);
+      border-right: 1px solid rgba(255, 255, 255, .1);
+      border-bottom: 1px solid rgba(255, 255, 255, .08);
+      border-radius: 12px;
+      font-family: var(--display);
+      font-weight: 700;
+      font-size: 15px;
+      letter-spacing: 1px;
+      cursor: pointer;
+      box-shadow: 0 8px 24px rgba(99, 102, 241, .4), inset 0 1px 0 rgba(255, 255, 255, .4);
+      transition: all .15s;
+      position: relative;
+      overflow: hidden
+    }
+
+    .btn-primary::before {
+      content: '';
+      position: absolute;
+      top: 0;
+      left: 0;
+      right: 0;
+      height: 50%;
+      background: linear-gradient(180deg, rgba(255, 255, 255, .2) 0%, transparent 100%);
+      pointer-events: none
+    }
+
+    .btn-primary:hover {
+      box-shadow: 0 12px 32px rgba(99, 102, 241, .5);
+      transform: translateY(-1px)
+    }
+
+    .btn-primary:active {
+      transform: translateY(1px)
+    }
+
+    .login-msg {
+      font-size: 11px;
+      text-align: center;
+      margin-top: 10px;
+      min-height: 16px
+    }
+
+    .login-msg.err {
+      color: #f87171
+    }
+
+    .login-msg.ok {
+      color: #34d399
+    }
+
+    /* MODALS */
+    .modal-overlay {
+      position: fixed;
+      inset: 0;
+      z-index: 8888;
+      background: rgba(0, 0, 0, .6);
+      backdrop-filter: blur(12px);
+      display: flex;
+      align-items: center;
+      justify-content: center
+    }
+
+    .modal-overlay.hide {
+      display: none
+    }
+
+    .modal-card {
+      width: 90%;
+      max-width: 580px;
+      max-height: 80vh;
+      overflow-y: auto;
+      background: linear-gradient(145deg, rgba(255, 255, 255, .18) 0%, rgba(255, 255, 255, .06) 50%, rgba(99, 102, 241, .08) 100%);
+      backdrop-filter: blur(40px) saturate(200%);
+      border-radius: 20px;
+      padding: 32px 36px;
+      border-top: 1px solid rgba(255, 255, 255, .55);
+      border-left: 1px solid rgba(255, 255, 255, .35);
+      border-right: 1px solid rgba(255, 255, 255, .12);
+      border-bottom: 1px solid rgba(255, 255, 255, .1);
+      box-shadow: 0 32px 80px rgba(0, 0, 0, .5), 0 8px 32px rgba(99, 102, 241, .25), inset 0 1px 0 rgba(255, 255, 255, .6);
+      color: rgba(255, 255, 255, .88)
+    }
+
+    .modal-card::-webkit-scrollbar {
+      width: 4px
+    }
+
+    .modal-card::-webkit-scrollbar-thumb {
+      background: rgba(255, 255, 255, .2);
+      border-radius: 2px
+    }
+
+    .modal-title {
+      font-family: var(--display);
+      font-size: 22px;
+      font-weight: 700;
+      color: rgba(255, 255, 255, .95)
+    }
+
+    .modal-sub {
+      font-size: 11px;
+      color: rgba(255, 255, 255, .4);
+      margin-bottom: 22px;
+      margin-top: 3px
+    }
+
+    .modal-close {
+      float: right;
+      background: rgba(255, 255, 255, .08);
+      border: 1px solid rgba(255, 255, 255, .2);
+      border-radius: 8px;
+      font-size: 16px;
+      cursor: pointer;
+      color: rgba(255, 255, 255, .5);
+      padding: 2px 8px;
+      transition: all .15s
+    }
+
+    .modal-close:hover {
+      background: rgba(244, 63, 94, .2);
+      color: #f87171;
+      border-color: rgba(244, 63, 94, .4)
+    }
+
+    .about-sec-title {
+      font-family: var(--display);
+      font-size: 12px;
+      font-weight: 700;
+      color: rgba(99, 102, 241, .9);
+      letter-spacing: 1.5px;
+      text-transform: uppercase;
+      border-bottom: 1px solid rgba(255, 255, 255, .1);
+      padding-bottom: 5px;
+      margin-bottom: 10px
+    }
+
+    .about-section {
+      margin-bottom: 20px
+    }
+
+    .about-row {
+      display: flex;
+      gap: 8px;
+      margin-bottom: 6px;
+      font-size: 12px
+    }
+
+    .about-lbl {
+      color: rgba(255, 255, 255, .4);
+      min-width: 110px;
+      font-weight: 600;
+      font-size: 11px;
+      text-transform: uppercase
+    }
+
+    .about-val {
+      color: rgba(255, 255, 255, .8)
+    }
+
+    .team-grid {
+      display: grid;
+      grid-template-columns: 1fr 1fr;
+      gap: 8px
+    }
+
+    .team-card {
+      background: rgba(255, 255, 255, .07);
+      backdrop-filter: blur(12px);
+      border-top: 1px solid rgba(255, 255, 255, .25);
+      border-left: 1px solid rgba(255, 255, 255, .15);
+      border-radius: 12px;
+      padding: 10px 12px;
+      box-shadow: 0 4px 16px rgba(0, 0, 0, .2)
+    }
+
+    .team-name {
+      font-weight: 700;
+      font-size: 12px;
+      color: rgba(99, 102, 241, .9);
+      font-family: var(--display)
+    }
+
+    .team-role {
+      font-size: 10px;
+      color: rgba(255, 255, 255, .45);
+      margin-top: 2px
+    }
+
+    .team-contact {
+      font-size: 10px;
+      color: rgba(56, 189, 248, .8);
+      margin-top: 3px;
+      font-family: var(--mono)
+    }
+
+    /* USER MGMT */
+    .umgmt-item {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      padding: 9px 12px;
+      margin-bottom: 7px;
+      background: rgba(255, 255, 255, .06);
+      backdrop-filter: blur(12px);
+      border-top: 1px solid rgba(255, 255, 255, .2);
+      border-left: 1px solid rgba(255, 255, 255, .12);
+      border-radius: 12px;
+      box-shadow: 0 2px 8px rgba(0, 0, 0, .2)
+    }
+
+    .umgmt-name {
+      font-weight: 600;
+      font-size: 12px;
+      color: rgba(255, 255, 255, .85)
+    }
+
+    .umgmt-email {
+      font-size: 10px;
+      color: rgba(255, 255, 255, .4)
+    }
+
+    .umgmt-btns {
+      display: flex;
+      gap: 5px
+    }
+
+    .ubtn {
+      padding: 4px 11px;
+      border-radius: 8px;
+      font-size: 10px;
+      font-weight: 700;
+      cursor: pointer;
+      font-family: var(--display);
+      backdrop-filter: blur(8px);
+      box-shadow: 0 2px 6px rgba(0, 0, 0, .2), inset 0 1px 0 rgba(255, 255, 255, .2);
+      transition: all .12s
+    }
+
+    .ubtn:active {
+      transform: translateY(1px)
+    }
+
+    .ubtn-ok {
+      background: rgba(16, 185, 129, .15);
+      color: #34d399;
+      border: 1px solid rgba(16, 185, 129, .35)
+    }
+
+    .ubtn-ok:hover {
+      background: rgba(16, 185, 129, .28)
+    }
+
+    .ubtn-no {
+      background: rgba(244, 63, 94, .12);
+      color: #f87171;
+      border: 1px solid rgba(244, 63, 94, .3)
+    }
+
+    .ubtn-no:hover {
+      background: rgba(244, 63, 94, .25)
+    }
+
+    .ubtn-del {
+      background: rgba(255, 255, 255, .06);
+      color: rgba(255, 255, 255, .45);
+      border: 1px solid rgba(255, 255, 255, .15)
+    }
+
+    .ubtn-del:hover {
+      background: rgba(255, 255, 255, .12)
+    }
+
+    .approved-tag {
+      font-size: 9px;
+      border-radius: 6px;
+      padding: 1px 5px;
+      font-family: var(--mono);
+      font-weight: 700;
+      background: rgba(16, 185, 129, .15);
+      color: #34d399;
+      border: 1px solid rgba(16, 185, 129, .3)
+    }
+
+    /* APP */
+    #app {
+      display: flex;
+      flex-direction: column;
+      width: 100vw;
+      height: 100vh;
+      position: relative;
+      z-index: 1
+    }
+
+    #app.hide {
+      display: none
+    }
+
+    /* HEADER */
+    #top-head {
+      height: 58px;
+      flex-shrink: 0;
+      background: linear-gradient(90deg, rgba(255, 255, 255, .1) 0%, rgba(255, 255, 255, .06) 50%, rgba(99, 102, 241, .08) 100%);
+      backdrop-filter: blur(40px) saturate(200%);
+      border-bottom: 1px solid rgba(255, 255, 255, .15);
+      box-shadow: 0 4px 24px rgba(0, 0, 0, .3), inset 0 1px 0 rgba(255, 255, 255, .3);
+      display: flex;
+      align-items: center;
+      padding: 0 16px;
+      gap: 12px;
+      position: relative;
+      overflow: hidden
+    }
+
+    #top-head::before {
+      content: '';
+      position: absolute;
+      top: 0;
+      left: 0;
+      right: 0;
+      height: 50%;
+      background: linear-gradient(180deg, rgba(255, 255, 255, .12) 0%, transparent 100%);
+      pointer-events: none
+    }
+
+    #head-title {
+      font-family: var(--display);
+      font-weight: 700;
+      color: rgba(255, 255, 255, .9);
+      font-size: 14px;
+      letter-spacing: .8px;
+      flex: 1;
+      line-height: 1.2;
+      z-index: 1;
+      text-shadow: 0 1px 4px rgba(0, 0, 0, .3)
+    }
+
+    #head-title span {
+      display: block;
+      font-size: 9px;
+      font-weight: 400;
+      color: rgba(255, 255, 255, .35);
+      letter-spacing: 1.5px;
+      text-transform: uppercase;
+      font-family: var(--font)
+    }
+
+    .head-right {
+      display: flex;
+      align-items: center;
+      gap: 7px;
+      z-index: 1
+    }
+
+    .head-user {
+      font-size: 10px;
+      color: rgba(255, 255, 255, .45);
+      font-family: var(--mono)
+    }
+
+    .head-btn {
+      padding: 5px 12px;
+      border-radius: 9px;
+      font-family: var(--display);
+      font-weight: 700;
+      font-size: 10px;
+      letter-spacing: .5px;
+      cursor: pointer;
+      background: rgba(255, 255, 255, .08);
+      backdrop-filter: blur(10px);
+      color: rgba(255, 255, 255, .75);
+      border-top: 1px solid rgba(255, 255, 255, .3);
+      border-left: 1px solid rgba(255, 255, 255, .18);
+      border-right: 1px solid rgba(255, 255, 255, .06);
+      border-bottom: 1px solid rgba(255, 255, 255, .05);
+      box-shadow: 0 2px 8px rgba(0, 0, 0, .25), inset 0 1px 0 rgba(255, 255, 255, .15);
+      transition: all .15s
+    }
+
+    .head-btn:hover {
+      background: rgba(255, 255, 255, .15)
+    }
+
+    .head-btn:active {
+      transform: translateY(1px)
+    }
+
+    .head-btn.warn {
+      background: rgba(244, 63, 94, .15);
+      color: rgba(255, 160, 180, .9);
+      border-color: rgba(244, 63, 94, .35)
+    }
+
+    .head-btn.warn:hover {
+      background: rgba(244, 63, 94, .28)
+    }
+
+    /* MAIN */
+    #main-body {
+      display: flex;
+      flex: 1;
+      overflow: hidden
+    }
+
+    /* LEFT */
+    #col-left {
+      width: 272px;
+      min-width: 272px;
+      height: 100%;
+      flex-shrink: 0;
+      background: linear-gradient(180deg, rgba(255, 255, 255, .1) 0%, rgba(255, 255, 255, .05) 50%, rgba(99, 102, 241, .05) 100%);
+      backdrop-filter: var(--lg-blur);
+      border-right: 1px solid rgba(255, 255, 255, .12);
+      box-shadow: var(--lg-shadow), inset 1px 0 0 rgba(255, 255, 255, .15);
+      display: flex;
+      flex-direction: column;
+      animation: slideInLeft .5s cubic-bezier(.22, .68, 0, 1.2) both;
+      position: relative;
+      overflow: hidden
+    }
+
+    #col-left::before {
+      content: '';
+      position: absolute;
+      top: 0;
+      left: 0;
+      right: 0;
+      height: 200px;
+      background: linear-gradient(180deg, rgba(255, 255, 255, .1) 0%, transparent 100%);
+      pointer-events: none;
+      z-index: 0
+    }
+
+    #col-left>* {
+      position: relative;
+      z-index: 1
+    }
+
+    @keyframes slideInLeft {
+      from {
+        transform: translateX(-30px);
+        opacity: 0
+      }
+
+      to {
+        transform: translateX(0);
+        opacity: 1
+      }
+    }
+
+    .col-head {
+      padding: 11px 14px;
+      flex-shrink: 0;
+      background: rgba(255, 255, 255, .06);
+      backdrop-filter: blur(10px);
+      border-bottom: 1px solid rgba(255, 255, 255, .1)
+    }
+
+    .col-inst {
+      font-size: 8px;
+      color: rgba(255, 255, 255, .35);
+      letter-spacing: 2px;
+      text-transform: uppercase;
+      font-weight: 600
+    }
+
+    .col-title {
+      font-family: var(--display);
+      color: rgba(255, 255, 255, .85);
+      font-weight: 700;
+      letter-spacing: .8px;
+      font-size: 13px;
+      margin-top: 1px
+    }
+
+    #breach-banner {
+      display: none;
+      padding: 6px 14px;
+      background: rgba(244, 63, 94, .15);
+      backdrop-filter: blur(8px);
+      border-bottom: 2px solid rgba(244, 63, 94, .6);
+      font-size: 10px;
+      font-weight: 700;
+      color: #f87171;
+      text-align: center;
+      flex-shrink: 0;
+      letter-spacing: .3px
+    }
+
+    #breach-banner.show {
+      display: block;
+      animation: blink-bg 1s infinite
+    }
+
+    @keyframes blink-bg {
+
+      0%,
+      100% {
+        background: rgba(244, 63, 94, .12)
+      }
+
+      50% {
+        background: rgba(244, 63, 94, .25)
+      }
+    }
+
+    #drone-list {
+      flex: 1;
+      overflow-y: auto;
+      padding: 10px
+    }
+
+    #drone-list::-webkit-scrollbar {
+      width: 3px
+    }
+
+    #drone-list::-webkit-scrollbar-thumb {
+      background: rgba(255, 255, 255, .15);
+      border-radius: 2px
+    }
+
+    .d-item {
+      background: linear-gradient(135deg, rgba(255, 255, 255, .12) 0%, rgba(255, 255, 255, .05) 100%);
+      backdrop-filter: blur(16px);
+      padding: 11px 13px;
+      border-radius: 14px;
+      margin-bottom: 8px;
+      border-top: 1px solid rgba(255, 255, 255, .3);
+      border-left: 1px solid rgba(255, 255, 255, .18);
+      border-right: 1px solid rgba(255, 255, 255, .06);
+      border-bottom: 1px solid rgba(255, 255, 255, .05);
+      cursor: pointer;
+      box-shadow: 0 4px 16px rgba(0, 0, 0, .2), inset 0 1px 0 rgba(255, 255, 255, .2);
+      transition: transform .2s cubic-bezier(.34, 1.56, .64, 1), box-shadow .2s;
+      position: relative;
+      overflow: hidden
+    }
+
+    .d-item::before {
+      content: '';
+      position: absolute;
+      top: 0;
+      left: 0;
+      right: 0;
+      height: 40%;
+      background: linear-gradient(180deg, rgba(255, 255, 255, .1) 0%, transparent 100%);
+      pointer-events: none
+    }
+
+    .d-item:hover {
+      transform: translateY(-2px);
+      box-shadow: 0 8px 28px rgba(99, 102, 241, .2)
+    }
+
+    .d-item.sel {
+      background: linear-gradient(135deg, rgba(99, 102, 241, .2) 0%, rgba(56, 189, 248, .1) 100%);
+      border-color: rgba(99, 102, 241, .55)
+    }
+
+    .d-item.breach {
+      border-color: rgba(244, 63, 94, .6) !important;
+      background: linear-gradient(135deg, rgba(244, 63, 94, .18) 0%, rgba(244, 63, 94, .06) 100%);
+      animation: pulse .9s infinite
+    }
+
+    .d-item.approved {
+      border-left: 3px solid rgba(16, 185, 129, .6)
+    }
+
+    @keyframes pulse {
+
+      0%,
+      100% {
+        box-shadow: 0 4px 16px rgba(0, 0, 0, .2)
+      }
+
+      50% {
+        box-shadow: 0 4px 24px rgba(244, 63, 94, .3)
+      }
+    }
+
+    .di-row {
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      margin-bottom: 5px
+    }
+
+    .di-name {
+      font-family: var(--display);
+      font-size: 13px;
+      font-weight: 700;
+      color: rgba(255, 255, 255, .9)
+    }
+
+    .di-hb {
+      font-size: 9px;
+      font-weight: 700;
+      padding: 2px 7px;
+      border-radius: 8px;
+      font-family: var(--mono)
+    }
+
+    .hb-ok {
+      background: rgba(16, 185, 129, .15);
+      color: #34d399;
+      border: 1px solid rgba(16, 185, 129, .3)
+    }
+
+    .hb-lost {
+      background: rgba(244, 63, 94, .12);
+      color: #f87171;
+      border: 1px solid rgba(244, 63, 94, .25)
+    }
+
+    .di-info {
+      font-size: 10px;
+      color: rgba(255, 255, 255, .4);
+      line-height: 1.7;
+      font-family: var(--mono)
+    }
+
+    .di-tags {
+      display: flex;
+      gap: 4px;
+      margin-top: 5px;
+      flex-wrap: wrap
+    }
+
+    .tag {
+      font-size: 9px;
+      font-weight: 700;
+      padding: 2px 6px;
+      border-radius: 8px;
+      letter-spacing: .3px;
+      font-family: var(--mono)
+    }
+
+    .tag-arm {
+      background: rgba(244, 63, 94, .15);
+      color: #f87171;
+      border: 1px solid rgba(244, 63, 94, .3)
+    }
+
+    .tag-dis {
+      background: rgba(255, 255, 255, .07);
+      color: rgba(255, 255, 255, .4);
+      border: 1px solid rgba(255, 255, 255, .15)
+    }
+
+    .tag-ok {
+      background: rgba(16, 185, 129, .15);
+      color: #34d399;
+      border: 1px solid rgba(16, 185, 129, .3)
+    }
+
+    .tag-ovr {
+      background: rgba(245, 158, 11, .12);
+      color: #fbbf24;
+      border: 1px solid rgba(245, 158, 11, .3)
+    }
+
+    .tag-br {
+      background: rgba(244, 63, 94, .15);
+      color: #f87171;
+      border: 1px solid rgba(244, 63, 94, .3)
+    }
+
+    .s-foot {
+      padding: 7px 12px;
+      border-top: 1px solid rgba(255, 255, 255, .08);
+      flex-shrink: 0;
+      display: flex;
+      justify-content: space-between;
+      font-size: 9px;
+      color: rgba(255, 255, 255, .35);
+      font-family: var(--mono);
+      background: rgba(0, 0, 0, .15)
+    }
+
+    .s-dot {
+      display: inline-block;
+      width: 7px;
+      height: 7px;
+      border-radius: 50%;
+      background: #10b981;
+      margin-right: 5px;
+      animation: livePulse 2s infinite
+    }
+
+    @keyframes livePulse {
+      0% {
+        box-shadow: 0 0 0 0 rgba(16, 185, 129, .5)
+      }
+
+      70% {
+        box-shadow: 0 0 0 7px rgba(16, 185, 129, 0)
+      }
+
+      100% {
+        box-shadow: 0 0 0 0 rgba(16, 185, 129, 0)
+      }
+    }
+
+    /* MAP */
+    #col-map {
+      flex: 1;
+      height: 100%;
+      position: relative;
+      overflow: hidden
+    }
+
+    #map {
+      position: absolute;
+      top: 0;
+      left: 0;
+      right: 0;
+      bottom: 0
+    }
+
+    #map-log {
+      position: absolute;
+      bottom: 12px;
+      left: 50%;
+      transform: translateX(-50%);
+      width: 290px;
+      z-index: 200;
+      pointer-events: none;
+      background: linear-gradient(135deg, rgba(255, 255, 255, .15) 0%, rgba(255, 255, 255, .07) 100%);
+      backdrop-filter: blur(24px) saturate(180%);
+      border-top: 1px solid rgba(255, 255, 255, .35);
+      border-left: 1px solid rgba(255, 255, 255, .2);
+      border-right: 1px solid rgba(255, 255, 255, .06);
+      border-bottom: 1px solid rgba(255, 255, 255, .05);
+      border-radius: 14px;
+      overflow: hidden;
+      box-shadow: 0 8px 32px rgba(0, 0, 0, .35)
+    }
+
+    .log-hd {
+      padding: 5px 10px;
+      border-bottom: 1px solid rgba(255, 255, 255, .1);
+      font-size: 8px;
+      letter-spacing: 2px;
+      color: rgba(255, 255, 255, .4);
+      font-family: var(--mono);
+      font-weight: 600;
+      background: rgba(255, 255, 255, .05)
+    }
+
+    #log-body {
+      max-height: 68px;
+      overflow-y: auto;
+      padding: 3px 10px
+    }
+
+    .ll {
+      font-size: 10px;
+      padding: 2px 0;
+      color: rgba(255, 255, 255, .4)
+    }
+
+    .ll .ts {
+      color: rgba(255, 255, 255, .2);
+      margin-right: 5px
+    }
+
+    .ok .msg {
+      color: #34d399
+    }
+
+    .warn .msg {
+      color: #f87171
+    }
+
+    .cmd .msg {
+      color: #fbbf24
+    }
+
+    .info .msg {
+      color: #818cf8
+    }
+
+    /* RIGHT */
+    #col-right {
+      width: 296px;
+      min-width: 296px;
+      height: 100%;
+      flex-shrink: 0;
+      overflow-y: auto;
+      background: linear-gradient(180deg, rgba(255, 255, 255, .1) 0%, rgba(255, 255, 255, .05) 50%, rgba(56, 189, 248, .05) 100%);
+      backdrop-filter: var(--lg-blur);
+      border-left: 1px solid rgba(255, 255, 255, .12);
+      box-shadow: var(--lg-shadow), inset -1px 0 0 rgba(255, 255, 255, .15);
+      animation: slideInRight .5s cubic-bezier(.22, .68, 0, 1.2) both
+    }
+
+    @keyframes slideInRight {
+      from {
+        transform: translateX(30px);
+        opacity: 0
+      }
+
+      to {
+        transform: translateX(0);
+        opacity: 1
+      }
+    }
+
+    #col-right::-webkit-scrollbar {
+      width: 3px
+    }
+
+    #col-right::-webkit-scrollbar-thumb {
+      background: rgba(255, 255, 255, .15);
+      border-radius: 2px
+    }
+
+    .rp-sec {
+      padding: 10px 13px 6px
+    }
+
+    .rp-lbl {
+      font-size: 8px;
+      letter-spacing: 2px;
+      color: rgba(255, 255, 255, .35);
+      font-family: var(--mono);
+      display: block;
+      margin-bottom: 8px;
+      font-weight: 700;
+      text-transform: uppercase
+    }
+
+    .rp-divider {
+      height: 1px;
+      background: linear-gradient(to right, transparent, rgba(255, 255, 255, .12), transparent);
+      margin: 6px 13px 10px
+    }
+
+    #sel-info {
+      margin: 10px 13px;
+      padding: 12px;
+      border-radius: 14px;
+      background: linear-gradient(135deg, rgba(255, 255, 255, .12) 0%, rgba(255, 255, 255, .05) 100%);
+      backdrop-filter: blur(16px);
+      border-top: 1px solid rgba(255, 255, 255, .3);
+      border-left: 1px solid rgba(255, 255, 255, .18);
+      border-right: 1px solid rgba(255, 255, 255, .06);
+      border-bottom: 1px solid rgba(255, 255, 255, .05);
+      box-shadow: 0 4px 16px rgba(0, 0, 0, .2), inset 0 1px 0 rgba(255, 255, 255, .15)
+    }
+
+    #sel-name {
+      font-family: var(--display);
+      font-size: 15px;
+      font-weight: 700;
+      color: rgba(255, 255, 255, .9);
+      margin-bottom: 9px
+    }
+
+    .tel-grid {
+      display: grid;
+      grid-template-columns: 1fr 1fr;
+      gap: 6px
+    }
+
+    .tc {
+      background: rgba(0, 0, 0, .2);
+      border: 1px solid rgba(255, 255, 255, .12);
+      border-radius: 10px;
+      padding: 7px 9px;
+      box-shadow: inset 0 2px 6px rgba(0, 0, 0, .2);
+      transition: transform .15s
+    }
+
+    .tc:hover {
+      transform: translateY(-1px)
+    }
+
+    .tc-lbl {
+      font-size: 8px;
+      color: rgba(255, 255, 255, .35);
+      text-transform: uppercase;
+      letter-spacing: .6px;
+      margin-bottom: 2px;
+      font-weight: 700
+    }
+
+    .tc-val {
+      font-size: 14px;
+      font-weight: 700;
+      color: rgba(255, 255, 255, .85);
+      font-family: var(--mono)
+    }
+
+    .tc-val.warn {
+      color: #f87171
+    }
+
+    .tc-val.ok {
+      color: #34d399
+    }
+
+    #os-box {
+      margin: 0 13px 10px;
+      padding: 10px 12px;
+      border-radius: 12px;
+      font-size: 11px;
+      border: 1px solid;
+      backdrop-filter: blur(10px);
+      transition: all .3s;
+      position: relative;
+      overflow: hidden
+    }
+
+    #os-box::before {
+      content: '';
+      position: absolute;
+      top: 0;
+      left: 0;
+      right: 0;
+      height: 40%;
+      background: linear-gradient(180deg, rgba(255, 255, 255, .1) 0%, transparent 100%);
+      pointer-events: none
+    }
+
+    #os-box>* {
+      position: relative;
+      z-index: 1
+    }
+
+    .os-wait {
+      background: rgba(255, 255, 255, .05);
+      border-color: rgba(255, 255, 255, .12)
+    }
+
+    .os-appr {
+      background: rgba(16, 185, 129, .12);
+      border-color: rgba(16, 185, 129, .35)
+    }
+
+    .os-ovr {
+      background: rgba(245, 158, 11, .1);
+      border-color: rgba(245, 158, 11, .35)
+    }
+
+    .os-br {
+      background: rgba(244, 63, 94, .12);
+      border-color: rgba(244, 63, 94, .4)
+    }
+
+    .os-t {
+      font-family: var(--display);
+      font-weight: 700;
+      font-size: 11px;
+      letter-spacing: .5px;
+      margin-bottom: 2px
+    }
+
+    .os-wait .os-t {
+      color: rgba(255, 255, 255, .4)
+    }
+
+    .os-appr .os-t {
+      color: #34d399
+    }
+
+    .os-ovr .os-t {
+      color: #fbbf24
+    }
+
+    .os-br .os-t {
+      color: #f87171
+    }
+
+    .os-s {
+      font-size: 10px;
+      color: rgba(255, 255, 255, .35);
+      line-height: 1.5
+    }
+
+    /* BUTTONS */
+    .btn-grid {
+      display: grid;
+      grid-template-columns: 1fr 1fr;
+      gap: 6px
+    }
+
+    .btn {
+      padding: 9px 5px;
+      border-radius: 11px;
+      font-family: var(--display);
+      font-size: 11px;
+      font-weight: 700;
+      letter-spacing: .4px;
+      cursor: pointer;
+      background: linear-gradient(135deg, rgba(255, 255, 255, .12) 0%, rgba(255, 255, 255, .05) 100%);
+      backdrop-filter: blur(12px);
+      border-top: 1px solid rgba(255, 255, 255, .3);
+      border-left: 1px solid rgba(255, 255, 255, .18);
+      border-right: 1px solid rgba(255, 255, 255, .06);
+      border-bottom: 1px solid rgba(255, 255, 255, .05);
+      color: rgba(255, 255, 255, .75);
+      box-shadow: 0 2px 10px rgba(0, 0, 0, .2), inset 0 1px 0 rgba(255, 255, 255, .15);
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      gap: 4px;
+      transition: transform .15s cubic-bezier(.34, 1.56, .64, 1), box-shadow .15s;
+      position: relative;
+      overflow: hidden
+    }
+
+    .btn::before {
+      content: '';
+      position: absolute;
+      top: 0;
+      left: 0;
+      right: 0;
+      height: 50%;
+      background: linear-gradient(180deg, rgba(255, 255, 255, .1) 0%, transparent 100%);
+      pointer-events: none
+    }
+
+    .btn:disabled {
+      opacity: .25;
+      cursor: not-allowed;
+      box-shadow: none
+    }
+
+    .btn:hover:not(:disabled) {
+      transform: translateY(-2px);
+      box-shadow: 0 6px 20px rgba(0, 0, 0, .25), inset 0 1px 0 rgba(255, 255, 255, .25)
+    }
+
+    .btn:active:not(:disabled) {
+      transform: translateY(1px)
+    }
+
+    .btn.full {
+      grid-column: 1/-1
+    }
+
+    .b-auth {
+      background: linear-gradient(135deg, rgba(16, 185, 129, .2) 0%, rgba(16, 185, 129, .08) 100%);
+      color: #34d399;
+      border-color: rgba(16, 185, 129, .4)
+    }
+
+    .b-auth:hover:not(:disabled) {
+      background: linear-gradient(135deg, rgba(16, 185, 129, .3) 0%, rgba(16, 185, 129, .12) 100%) !important
+    }
+
+    .b-deny {
+      background: linear-gradient(135deg, rgba(244, 63, 94, .18) 0%, rgba(244, 63, 94, .07) 100%);
+      color: #f87171;
+      border-color: rgba(244, 63, 94, .35)
+    }
+
+    .b-deny:hover:not(:disabled) {
+      background: linear-gradient(135deg, rgba(244, 63, 94, .28) 0%, rgba(244, 63, 94, .12) 100%) !important
+    }
+
+    .b-take {
+      background: linear-gradient(135deg, rgba(245, 158, 11, .2) 0%, rgba(245, 158, 11, .08) 100%);
+      color: #fbbf24;
+      border-color: rgba(245, 158, 11, .35)
+    }
+
+    .b-take:hover:not(:disabled) {
+      background: linear-gradient(135deg, rgba(245, 158, 11, .3) 0%, rgba(245, 158, 11, .12) 100%) !important
+    }
+
+    .b-rel {
+      background: linear-gradient(135deg, rgba(99, 102, 241, .2) 0%, rgba(99, 102, 241, .08) 100%);
+      color: #a5b4fc;
+      border-color: rgba(99, 102, 241, .35)
+    }
+
+    .b-rel:hover:not(:disabled) {
+      background: linear-gradient(135deg, rgba(99, 102, 241, .3) 0%, rgba(99, 102, 241, .12) 100%) !important
+    }
+
+    .b-rtl:hover:not(:disabled) {
+      background: linear-gradient(135deg, rgba(245, 158, 11, .25), rgba(245, 158, 11, .1)) !important;
+      color: #fbbf24;
+      border-color: rgba(245, 158, 11, .4)
+    }
+
+    .b-kill:hover:not(:disabled) {
+      background: linear-gradient(135deg, rgba(244, 63, 94, .25), rgba(244, 63, 94, .1)) !important;
+      color: #f87171;
+      border-color: rgba(244, 63, 94, .4)
+    }
+
+    .b-hov:hover:not(:disabled) {
+      background: linear-gradient(135deg, rgba(56, 189, 248, .25), rgba(56, 189, 248, .1)) !important;
+      color: #38bdf8;
+      border-color: rgba(56, 189, 248, .4)
+    }
+
+    .b-land:hover:not(:disabled) {
+      background: linear-gradient(135deg, rgba(16, 185, 129, .25), rgba(16, 185, 129, .1)) !important;
+      color: #34d399;
+      border-color: rgba(16, 185, 129, .4)
+    }
+
+    /* JOYSTICK */
+    #joy-wrap {
+      margin: 0 13px 12px;
+      padding: 14px;
+      border-radius: 16px;
+      display: flex;
+      flex-direction: column;
+      gap: 10px;
+      background: linear-gradient(135deg, rgba(255, 255, 255, .1) 0%, rgba(255, 255, 255, .04) 100%);
+      backdrop-filter: blur(16px);
+      border-top: 1px solid rgba(255, 255, 255, .25);
+      border-left: 1px solid rgba(255, 255, 255, .15);
+      border-right: 1px solid rgba(255, 255, 255, .05);
+      border-bottom: 1px solid rgba(255, 255, 255, .04);
+      box-shadow: 0 4px 20px rgba(0, 0, 0, .2), inset 0 1px 0 rgba(255, 255, 255, .12)
+    }
+
+    .joy-lbl {
+      font-size: 8px;
+      letter-spacing: 2px;
+      color: rgba(255, 255, 255, .45);
+      font-family: var(--mono);
+      text-align: center;
+      font-weight: 700
+    }
+
+    .key-hint {
+      font-size: 9px;
+      color: rgba(255, 255, 255, .3);
+      text-align: center
+    }
+
+    .key-grid {
+      display: grid;
+      grid-template-columns: repeat(3, 34px);
+      grid-template-rows: repeat(2, 34px);
+      gap: 4px;
+      justify-content: center
+    }
+
+    .key {
+      width: 34px;
+      height: 34px;
+      border-radius: 9px;
+      font-size: 11px;
+      font-weight: 700;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      user-select: none;
+      font-family: var(--mono);
+      cursor: default;
+      background: rgba(255, 255, 255, .06);
+      backdrop-filter: blur(10px);
+      border-top: 1px solid rgba(255, 255, 255, .2);
+      border-left: 1px solid rgba(255, 255, 255, .12);
+      border-right: 1px solid rgba(255, 255, 255, .04);
+      border-bottom: 1px solid rgba(255, 255, 255, .04);
+      color: rgba(255, 255, 255, .35);
+      box-shadow: 0 2px 8px rgba(0, 0, 0, .2), inset 0 1px 0 rgba(255, 255, 255, .1);
+      transition: transform .1s
+    }
+
+    .key.on {
+      background: linear-gradient(135deg, rgba(99, 102, 241, .3), rgba(56, 189, 248, .15));
+      color: #a5b4fc;
+      border-color: rgba(99, 102, 241, .5);
+      box-shadow: 0 4px 16px rgba(99, 102, 241, .3);
+      transform: translateY(-1px)
+    }
+
+    .key.blank {
+      border: none;
+      background: transparent;
+      box-shadow: none
+    }
+
+    .vert-row {
+      display: flex;
+      gap: 6px;
+      justify-content: center;
+      align-items: center
+    }
+
+    .vkey {
+      width: 34px;
+      height: 34px;
+      border-radius: 9px;
+      font-size: 9px;
+      font-weight: 700;
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      justify-content: center;
+      gap: 1px;
+      user-select: none;
+      font-family: var(--mono);
+      cursor: default;
+      background: rgba(255, 255, 255, .06);
+      backdrop-filter: blur(10px);
+      border-top: 1px solid rgba(255, 255, 255, .2);
+      border-left: 1px solid rgba(255, 255, 255, .12);
+      border-right: 1px solid rgba(255, 255, 255, .04);
+      border-bottom: 1px solid rgba(255, 255, 255, .04);
+      color: rgba(255, 255, 255, .35);
+      box-shadow: 0 2px 8px rgba(0, 0, 0, .2);
+      transition: transform .1s
+    }
+
+    .vkey.on {
+      background: linear-gradient(135deg, rgba(16, 185, 129, .25), rgba(16, 185, 129, .1));
+      color: #34d399;
+      border-color: rgba(16, 185, 129, .5);
+      box-shadow: 0 4px 16px rgba(16, 185, 129, .25);
+      transform: translateY(-1px)
+    }
+
+    .vkey .ic {
+      font-size: 13px;
+      line-height: 1
+    }
+
+    .pad-wrap {
+      display: flex;
+      justify-content: center;
+      align-items: center
+    }
+
+    #joy-pad {
+      width: 108px;
+      height: 108px;
+      border-radius: 50%;
+      cursor: crosshair;
+      touch-action: none;
+      background: radial-gradient(circle at 35% 30%, rgba(255, 255, 255, .12), rgba(99, 102, 241, .08) 50%, rgba(56, 189, 248, .06) 100%);
+      backdrop-filter: blur(12px);
+      border: 1px solid rgba(255, 255, 255, .25);
+      position: relative;
+      box-shadow: 0 8px 24px rgba(0, 0, 0, .3), 0 2px 8px rgba(99, 102, 241, .15), inset 0 2px 8px rgba(255, 255, 255, .08)
+    }
+
+    #joy-pad::before {
+      content: '';
+      position: absolute;
+      top: 5px;
+      left: 5px;
+      right: 5px;
+      height: 45%;
+      border-radius: 50%;
+      background: radial-gradient(ellipse at 40% 30%, rgba(255, 255, 255, .18), transparent 70%);
+      pointer-events: none
+    }
+
+    #joy-pad.drag {
+      box-shadow: 0 10px 32px rgba(0, 0, 0, .35), 0 2px 12px rgba(99, 102, 241, .25)
+    }
+
+    #joy-knob {
+      width: 32px;
+      height: 32px;
+      border-radius: 50%;
+      position: absolute;
+      top: 50%;
+      left: 50%;
+      transform: translate(-50%, -50%);
+      pointer-events: none;
+      background: linear-gradient(145deg, rgba(99, 102, 241, .7), rgba(56, 189, 248, .6));
+      border-top: 1px solid rgba(255, 255, 255, .5);
+      border-left: 1px solid rgba(255, 255, 255, .35);
+      border-right: 1px solid rgba(255, 255, 255, .1);
+      border-bottom: 1px solid rgba(255, 255, 255, .08);
+      box-shadow: 0 6px 16px rgba(99, 102, 241, .5), 0 2px 6px rgba(0, 0, 0, .3), inset 0 1px 0 rgba(255, 255, 255, .4)
+    }
+
+    .spd-row {
+      display: flex;
+      align-items: center;
+      gap: 7px;
+      font-size: 10px;
+      color: rgba(255, 255, 255, .4)
+    }
+
+    .spd-row input {
+      flex: 1;
+      accent-color: #6366f1
+    }
+
+    #spd-v {
+      color: #a5b4fc;
+      min-width: 30px;
+      font-family: var(--mono)
+    }
+
+    .vel-row {
+      display: grid;
+      grid-template-columns: 1fr 1fr 1fr;
+      gap: 4px
+    }
+
+    .vc {
+      background: rgba(0, 0, 0, .2);
+      border: 1px solid rgba(255, 255, 255, .1);
+      border-radius: 8px;
+      padding: 5px;
+      text-align: center;
+      box-shadow: inset 0 2px 6px rgba(0, 0, 0, .2)
+    }
+
+    .vv {
+      font-size: 11px;
+      font-weight: 700;
+      color: #a5b4fc;
+      font-family: var(--mono)
+    }
+
+    .vl {
+      font-size: 8px;
+      color: rgba(255, 255, 255, .3);
+      margin-top: 1px;
+      font-weight: 700;
+      letter-spacing: .3px
+    }
+
+    /* REQUEST NOTIF */
+    #req-panel {
+      position: fixed;
+      top: 70px;
+      left: 50%;
+      transform: translateX(-50%);
+      z-index: 9999;
+      display: flex;
+      flex-direction: column;
+      gap: 8px;
+      pointer-events: none;
+      align-items: center
+    }
+
+    .req-card {
+      pointer-events: all;
+      min-width: 340px;
+      background: linear-gradient(135deg, rgba(255, 255, 255, .15), rgba(255, 255, 255, .06));
+      backdrop-filter: blur(32px) saturate(200%);
+      border-top: 2px solid rgba(244, 63, 94, .5);
+      border-left: 1px solid rgba(255, 255, 255, .25);
+      border-right: 1px solid rgba(255, 255, 255, .08);
+      border-bottom: 1px solid rgba(255, 255, 255, .06);
+      border-radius: 16px;
+      padding: 13px 18px;
+      display: flex;
+      align-items: center;
+      gap: 14px;
+      animation: slideDown .4s cubic-bezier(.22, .68, 0, 1.2);
+      box-shadow: 0 16px 48px rgba(0, 0, 0, .4), 0 4px 16px rgba(244, 63, 94, .2), inset 0 1px 0 rgba(255, 255, 255, .2)
+    }
+
+    @keyframes slideDown {
+      from {
+        opacity: 0;
+        transform: translateY(-20px) scale(.96)
+      }
+
+      to {
+        opacity: 1;
+        transform: translateY(0) scale(1)
+      }
+    }
+
+    .req-icon {
+      font-size: 22px;
+      flex-shrink: 0
+    }
+
+    .req-text {
+      flex: 1
+    }
+
+    .req-drone {
+      font-size: 13px;
+      font-weight: 700;
+      color: #f87171;
+      font-family: var(--display)
+    }
+
+    .req-sub {
+      font-size: 10px;
+      color: rgba(255, 255, 255, .4);
+      margin-top: 2px
+    }
+
+    .req-btns {
+      display: flex;
+      gap: 6px;
+      flex-shrink: 0
+    }
+
+    .req-btn {
+      padding: 6px 13px;
+      border-radius: 9px;
+      font-size: 11px;
+      font-weight: 700;
+      cursor: pointer;
+      font-family: var(--display);
+      backdrop-filter: blur(8px);
+      box-shadow: 0 2px 8px rgba(0, 0, 0, .2), inset 0 1px 0 rgba(255, 255, 255, .15);
+      transition: all .15s
+    }
+
+    .req-btn:hover {
+      transform: translateY(-1px)
+    }
+
+    .req-btn:active {
+      transform: translateY(1px)
+    }
+
+    .req-approve {
+      background: rgba(16, 185, 129, .15);
+      color: #34d399;
+      border: 1px solid rgba(16, 185, 129, .35)
+    }
+
+    .req-approve:hover {
+      background: rgba(16, 185, 129, .28) !important
+    }
+
+    .req-deny {
+      background: rgba(255, 255, 255, .07);
+      color: rgba(255, 255, 255, .5);
+      border: 1px solid rgba(255, 255, 255, .15)
+    }
+
+    /* GEOFENCE */
+    .zf-input {
+      width: 100%;
+      padding: 7px 10px;
+      background: rgba(0, 0, 0, .2);
+      backdrop-filter: blur(8px);
+      border: 1px solid rgba(255, 255, 255, .15);
+      border-radius: 9px;
+      font-family: var(--font);
+      font-size: 11px;
+      color: rgba(255, 255, 255, .8);
+      box-shadow: inset 0 2px 6px rgba(0, 0, 0, .15);
+      outline: none;
+      transition: all .2s
+    }
+
+    .zf-input:focus {
+      background: rgba(255, 255, 255, .08);
+      border-color: rgba(99, 102, 241, .5);
+      box-shadow: inset 0 2px 6px rgba(0, 0, 0, .1), 0 0 0 3px rgba(99, 102, 241, .15)
+    }
+
+    .zf-input::placeholder {
+      color: rgba(255, 255, 255, .2)
+    }
+
+    #empty-msg {
+      text-align: center;
+      padding: 30px 16px;
+      color: rgba(255, 255, 255, .3);
+      font-size: 12px;
+      line-height: 2;
+      display: none
+    }
+
+    #empty-msg .empty-icon {
+      font-size: 32px;
+      margin-bottom: 8px;
+      opacity: .35
+    }
+
+    /* LEAFLET */
+    .leaflet-popup-content-wrapper {
+      background: rgba(15, 12, 41, .8) !important;
+      backdrop-filter: blur(20px) !important;
+      border: 1px solid rgba(255, 255, 255, .2) !important;
+      border-radius: 14px !important;
+      color: rgba(255, 255, 255, .85) !important;
+      font-size: 11px;
+      box-shadow: 0 12px 32px rgba(0, 0, 0, .4) !important
+    }
+
+    .leaflet-popup-tip {
+      background: rgba(15, 12, 41, .8) !important
+    }
+
+    .leaflet-control-zoom a {
+      background: rgba(15, 12, 41, .6) !important;
+      backdrop-filter: blur(12px) !important;
+      border-color: rgba(255, 255, 255, .15) !important;
+      color: rgba(255, 255, 255, .7) !important
+    }
+
+    .leaflet-control-zoom a:hover {
+      background: rgba(99, 102, 241, .3) !important
+    }
+  </style>
+</head>
+
+<body>
+
+  <div id="alarm-flash"></div>
+
+  <!-- LOGIN -->
+  <div id="login-wrap">
+    <div class="login-card">
+      <div class="login-logo-row">
+        <!-- Logo: place your image at  static/trigun logo.png -->
+        <img class="login-logo-img" src="trigun logo.png"
+          onerror="this.style.display='none';document.getElementById('llgfb').style.display='flex'">
+        <div class="login-logo-fb" id="llgfb" style="display:none">ATC</div>
+        <div>
+          <div class="login-title">Trigun Robotic Systems Private Limited</div>
+          <div class="login-sub">Drone Air Traffic Control System</div>
+        </div>
+      </div>
+      <div class="tab-row">
+        <button class="tab-btn active" id="tab-login" onclick="switchTab('login')">LOGIN</button>
+        <button class="tab-btn" id="tab-reg" onclick="switchTab('register')">REGISTER</button>
+      </div>
+      <div id="form-login">
+        <div class="form-group"><label class="form-label">Username</label>
+          <input class="form-input" id="l-user" type="text" placeholder="Enter username" autocomplete="username">
+        </div>
+        <div class="form-group"><label class="form-label">Password</label>
+          <input class="form-input" id="l-pass" type="password" placeholder="Enter password">
+        </div>
+        <button class="btn-primary" onclick="doLogin()">LOGIN →</button>
+        <div class="login-msg" id="login-msg"></div>
+      </div>
+      <div id="form-register" style="display:none">
+        <div class="form-group"><label class="form-label">Full Name</label>
+          <input class="form-input" id="r-name" type="text" placeholder="Your full name">
+        </div>
+        <div class="form-group"><label class="form-label">Username</label>
+          <input class="form-input" id="r-user" type="text" placeholder="Choose a username">
+        </div>
+        <div class="form-group"><label class="form-label">Email</label>
+          <input class="form-input" id="r-email" type="email" placeholder="your@email.com">
+        </div>
+        <div class="form-group"><label class="form-label">Password</label>
+          <input class="form-input" id="r-pass" type="password" placeholder="Choose a password">
+        </div>
+        <button class="btn-primary" onclick="doRegister()">REQUEST ACCESS →</button>
+        <div class="login-msg" id="reg-msg"></div>
+      </div>
+      <div style="margin-top:16px;text-align:center;font-size:9px;color:rgba(255,255,255,.25)">
+        Registration requires admin approval &nbsp;·&nbsp; Trigun Robotics
+      </div>
+    </div>
+  </div>
+
+  <!-- ═══ ABOUT MODAL ═══ -->
+  <div class="modal-overlay hide" id="about-modal">
+    <div class="modal-card">
+      <button class="modal-close" onclick="closeModal('about-modal')">✕</button>
+      <div class="modal-title">About This System</div>
+      <div class="modal-sub">Trigun Robotic Systems Private Limited — Drone ATC Platform</div>
+      <div class="about-section">
+        <div class="about-sec-title">Organization</div>
+        <div class="about-row"><span class="about-lbl">Company</span><span class="about-val">Trigun Robotics</span>
+        </div>
+        <div class="about-row"><span class="about-lbl">Focus</span><span class="about-val">Unmanned Aerial Systems &amp;
+            Autonomous Control</span></div>
+        <div class="about-row"><span class="about-lbl">Contact</span><span
+            class="about-val">contact@trigunrobotics.com</span></div>
+      </div>
+      <div class="about-section">
+        <div class="about-sec-title">Project Team</div>
+        <div class="team-grid">
+          <div class="team-card">
+            <div class="team-name">Dr. K Krishna Naik</div>
+            <div class="team-role">Project Lead</div>
+            <div class="team-contact">lead@iiitk.ac.in</div>
+          </div>
+          <div class="team-card">
+            <div class="team-name">Husenabasha Sompur</div>
+            <div class="team-role">Software Engineer — Backend, ESP8266 &amp; Dashboard</div>
+            <div class="team-contact">github.com/MrDezire</div>
+          </div>
+        </div>
+      </div><!-- ✅ closes about-section (team) -->
+      <div style="font-size:10px;color:rgba(255,255,255,.3);text-align:center;margin-top:16px;line-height:1.8">
+        © 2026 Trigun Robotics · All Rights Reserved<br>
+        <a href="mailto:support@trigunrobotics.com" style="color:#38bdf8">support@trigunrobotics.com</a>
+      </div>
+    </div><!-- ✅ closes modal-card -->
+  </div><!-- ✅ closes modal-overlay (about-modal) -->
+
+  <!-- USER MGMT MODAL -->
+  <div class="modal-overlay hide" id="umgmt-modal">
+    <div class="modal-card">
+      <button class="modal-close" onclick="closeModal('umgmt-modal')">✕</button>
+      <div class="modal-title">User Management</div>
+      <div class="modal-sub">Approve registrations and manage operator access</div>
+      <div style="margin-bottom:16px">
+        <div class="rp-lbl" style="margin-bottom:8px">PENDING APPROVALS</div>
+        <div id="pending-list">
+          <div style="font-size:12px;color:rgba(255,255,255,.3);text-align:center;padding:12px">No pending requests
+          </div>
+        </div>
+      </div>
+      <div>
+        <div class="rp-lbl" style="margin-bottom:8px">APPROVED USERS</div>
+        <div id="approved-list">
+          <div style="font-size:12px;color:rgba(255,255,255,.3);text-align:center;padding:12px">No users yet</div>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <div id="req-panel"></div>
+
+  <!-- MAIN APP -->
+  <div id="app" class="hide">
+    <div id="top-head">
+      <!-- Logo: place your image at  static/trigun logo.png -->
+      <img id="head-logo" src="trigun logo.png"
+        onerror="this.style.display='none';document.getElementById('head-logo-fb').style.display='flex'">
+      <div id="head-logo-fb">ATC</div>
+      <div id="head-title">
+        TRIGUN ROBOTICS DRONE ATC SYSTEM
+      </div>
+      <div class="head-right">
+        <span class="head-user" id="head-user-label"></span>
+        <button class="head-btn-alarm" id="alarm-toggle" onclick="toggleAlarm()" title="Toggle alarm sound">🔔
+          ALARM</button>
+        <button class="head-btn" onclick="openModal('about-modal')">ℹ ABOUT</button>
+        <button class="head-btn" id="btn-umgmt" onclick="openUmgmt()" style="display:none">👥 USERS</button>
+        <button class="head-btn warn" onclick="doLogout()">⏻ LOGOUT</button>
+      </div>
+    </div>
+
+    <div id="main-body">
+      <!-- LEFT -->
+      <div id="col-left">
+        <div class="col-head">
+          <div class="col-inst">Fleet Monitor</div>
+          <div class="col-title">DRONE FLEET CONTROL</div>
+        </div>
+        <div id="breach-banner">⚠ GEOFENCE BREACH — TAKE ACTION</div>
+        <div id="drone-list"></div>
+        <div id="empty-msg">
+          <div class="empty-icon">🚁</div>No drones online.<br>Waiting for telemetry…
+        </div>
+        <div class="s-foot">
+          <span><span class="s-dot" id="sys-dot"></span><span id="sys-txt">Connecting…</span></span>
+          <span id="fleet-cnt">0 drones</span>
+        </div>
+      </div>
+
+      <!-- MAP -->
+      <div id="col-map">
+        <div id="map"></div>
+        <div id="map-log">
+          <div class="log-hd">SYSTEM LOG</div>
+          <div id="log-body"></div>
+        </div>
+      </div>
+
+      <!-- RIGHT -->
+      <div id="col-right">
+        <div class="col-head">
+          <div class="col-inst">Authority Control</div>
+          <div class="col-title" id="rp-title">SELECT A DRONE</div>
+        </div>
+        <div id="sel-info">
+          <div id="sel-name">— No drone selected —</div>
+          <div class="tel-grid" id="tel-grid" style="display:none">
+            <div class="tc">
+              <div class="tc-lbl">Mode</div>
+              <div class="tc-val" id="t-mode">—</div>
+            </div>
+            <div class="tc">
+              <div class="tc-lbl">Battery</div>
+              <div class="tc-val" id="t-batt">—</div>
+            </div>
+            <div class="tc">
+              <div class="tc-lbl">Altitude</div>
+              <div class="tc-val" id="t-alt">—</div>
+            </div>
+            <div class="tc">
+              <div class="tc-lbl">Armed</div>
+              <div class="tc-val" id="t-arm">—</div>
+            </div>
+            <div class="tc" style="grid-column:1/-1">
+              <div class="tc-lbl">Position</div>
+              <div class="tc-val" id="t-pos" style="font-size:11px">—</div>
+            </div>
+          </div>
+        </div>
+        <div id="os-box" class="os-wait">
+          <div class="os-t">NO DRONE SELECTED</div>
+          <div class="os-s">Click a drone in the left panel.</div>
+        </div>
+        <div class="rp-divider"></div>
+        <div class="rp-sec" id="auth-controls">
+          <span class="rp-lbl">PHASE 1 — AUTHORIZATION</span>
+          <div class="btn-grid">
+            <button class="btn b-auth" id="b-auth" disabled onclick="authorizeCmd()">✓ AUTHORIZE</button>
+            <button class="btn b-deny" id="b-deny" disabled onclick="denyCmd()">✗ DENY</button>
+          </div>
+        </div>
+        <div class="rp-sec" id="override-controls">
+          <span class="rp-lbl">PHASE 2 — OVERRIDE</span>
+          <div class="btn-grid">
+            <button class="btn b-take full" id="b-take" disabled onclick="takeOverride()">⚡ TAKE OVERRIDE</button>
+            <button class="btn b-rel full" id="b-rel" disabled onclick="releaseOverride()">↩ RELEASE OVERRIDE</button>
+          </div>
+        </div>
+        <div class="rp-sec" id="cmd-controls">
+          <span class="rp-lbl">MASTER COMMANDS</span>
+          <div class="btn-grid">
+            <button class="btn b-rtl" id="b-rtl" disabled onclick="authCmd('rtl')">▲ RTL</button>
+            <button class="btn b-kill" id="b-kill" disabled onclick="authCmd('kill')">■ KILL</button>
+            <button class="btn b-hov" id="b-hov" disabled onclick="authCmd('hover')">⊕ HOVER</button>
+            <button class="btn b-land" id="b-land" disabled onclick="authCmd('land')">▼ LAND</button>
+          </div>
+        </div>
+        <div id="joy-wrap">
+          <div class="joy-lbl">MANUAL JOYSTICK CONTROL</div>
+          <div class="key-hint">W/S = fwd/back · A/D = left/right · Q/E = up/down</div>
+          <div style="display:flex;flex-direction:column;align-items:center;gap:6px">
+            <div class="key-grid">
+              <div class="key blank"></div>
+              <div class="key" id="k-w">W</div>
+              <div class="key blank"></div>
+              <div class="key" id="k-a">A</div>
+              <div class="key" id="k-s">S</div>
+              <div class="key" id="k-d">D</div>
+            </div>
+            <div class="vert-row">
+              <div class="vkey" id="k-q"><span class="ic">▲</span>Q</div>
+              <span style="font-size:9px;color:rgba(255,255,255,.25)">UP/DN</span>
+              <div class="vkey" id="k-e"><span class="ic">▼</span>E</div>
+            </div>
+          </div>
+          <div class="pad-wrap">
+            <div id="joy-pad">
+              <div id="joy-knob"></div>
+            </div>
+          </div>
+          <div class="spd-row">
+            <span>SPD</span>
+            <input type="range" min="0.5" max="5" step="0.5" value="2" id="spd-sl"
+              oninput="moveSpeed=+this.value;document.getElementById('spd-v').textContent=this.value+'m/s'">
+            <span id="spd-v">2m/s</span>
+          </div>
+          <div class="vel-row">
+            <div class="vc">
+              <div class="vv" id="v-f">0.0</div>
+              <div class="vl">FWD</div>
+            </div>
+            <div class="vc">
+              <div class="vv" id="v-l">0.0</div>
+              <div class="vl">LAT</div>
+            </div>
+            <div class="vc">
+              <div class="vv" id="v-v">0.0</div>
+              <div class="vl">VERT</div>
+            </div>
+          </div>
+        </div>
+        <div class="rp-divider"></div>
+        <div class="rp-sec">
+          <span class="rp-lbl">GEOFENCE ZONES</span>
+          <div id="zone-list" style="margin-bottom:8px;display:flex;flex-direction:column;gap:5px"></div>
+          <div
+            style="background:linear-gradient(135deg,rgba(255,255,255,.08),rgba(255,255,255,.03));backdrop-filter:blur(12px);border-top:1px solid rgba(255,255,255,.2);border-left:1px solid rgba(255,255,255,.12);border-right:1px solid rgba(255,255,255,.04);border-bottom:1px solid rgba(255,255,255,.04);border-radius:14px;padding:11px;display:flex;flex-direction:column;gap:6px;box-shadow:0 4px 16px rgba(0,0,0,.2)">
+            <span
+              style="font-size:8px;color:rgba(99,102,241,.8);letter-spacing:2px;font-family:var(--mono);font-weight:700">ADD
+              NEW ZONE</span>
+            <input id="zf-label" placeholder="Zone label" class="zf-input">
+            <div style="display:grid;grid-template-columns:1fr 1fr;gap:5px">
+              <input id="zf-latmin" placeholder="Lat min" type="number" step="0.000001" class="zf-input">
+              <input id="zf-latmax" placeholder="Lat max" type="number" step="0.000001" class="zf-input">
+              <input id="zf-lonmin" placeholder="Lon min" type="number" step="0.000001" class="zf-input">
+              <input id="zf-lonmax" placeholder="Lon max" type="number" step="0.000001" class="zf-input">
+            </div>
+            <div style="display:flex;gap:5px">
+              <button class="btn b-rel" id="b-draw-zone" onclick="startDrawZone()"
+                style="flex:1;padding:7px 5px;font-size:10px">✎ DRAW ON MAP</button>
+              <button class="btn b-auth" onclick="addZone()" style="flex:1;padding:7px 5px;font-size:10px">+ ADD
+                ZONE</button>
+            </div>
+            <div id="zf-err" style="font-size:10px;color:#f87171;display:none"></div>
+          </div>
+        </div>
+        <div style="height:16px"></div>
+      </div>
+    </div>
+  </div>
+
+  <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
+  <script>
+    var alarmEnabled = true, alarmActive = false, alarmInterval = null, audioCtx = null;
+    var prevBreachIds = new Set(), breachAlarmIds = new Set();
+    function getACtx() { if (!audioCtx || audioCtx.state === 'closed') audioCtx = new (window.AudioContext || window.webkitAudioContext)(); if (audioCtx.state === 'suspended') audioCtx.resume(); return audioCtx; }
+    function _tone(freq, t, dur, type, vol) { var ctx = getACtx(), osc = ctx.createOscillator(), gain = ctx.createGain(); osc.connect(gain); gain.connect(ctx.destination); osc.type = type || 'sawtooth'; osc.frequency.value = freq; gain.gain.setValueAtTime(vol || 0.22, t); gain.gain.exponentialRampToValueAtTime(0.001, t + dur); osc.start(t); osc.stop(t + dur); }
+    function playBreachAlarm() { if (!alarmEnabled) return; var t = getACtx().currentTime; _tone(960, t, 0.18, 'sawtooth', 0.25); _tone(720, t + 0.2, 0.18, 'sawtooth', 0.22); _tone(960, t + 0.4, 0.18, 'sawtooth', 0.25); _tone(720, t + 0.6, 0.18, 'sawtooth', 0.22); _tone(480, t + 0.85, 0.12, 'square', 0.15); }
+    function playRequestChime() { if (!alarmEnabled) return; var t = getACtx().currentTime; _tone(523, t, 0.12, 'sine', 0.12); _tone(659, t + 0.13, 0.12, 'sine', 0.12); _tone(784, t + 0.26, 0.18, 'sine', 0.10); }
+    function playOfflineBeep() { if (!alarmEnabled) return; var t = getACtx().currentTime; _tone(330, t, 0.1, 'sine', 0.1); _tone(220, t + 0.12, 0.18, 'sine', 0.1); }
+    function startBreachAlarm(id) { breachAlarmIds.add(id); if (alarmActive) return; alarmActive = true; document.getElementById('alarm-flash').classList.add('active'); var btn = document.getElementById('alarm-toggle'); btn.className = 'head-btn-alarm alarming'; btn.textContent = '🚨 BREACH'; playBreachAlarm(); alarmInterval = setInterval(playBreachAlarm, 2200); }
+    function stopBreachAlarm(id) { if (id) breachAlarmIds.delete(id); if (breachAlarmIds.size > 0) return; alarmActive = false; if (alarmInterval) { clearInterval(alarmInterval); alarmInterval = null; } document.getElementById('alarm-flash').classList.remove('active'); var btn = document.getElementById('alarm-toggle'); btn.className = alarmEnabled ? 'head-btn-alarm' : 'head-btn-alarm muted'; btn.textContent = alarmEnabled ? '🔔 ALARM' : '🔕 ALARM'; }
+    function toggleAlarm() { alarmEnabled = !alarmEnabled; var btn = document.getElementById('alarm-toggle'); if (!alarmEnabled) { if (alarmInterval) { clearInterval(alarmInterval); alarmInterval = null; } document.getElementById('alarm-flash').classList.remove('active'); btn.className = 'head-btn-alarm muted'; btn.textContent = '🔕 ALARM'; alarmActive = false; } else { btn.className = 'head-btn-alarm'; btn.textContent = '🔔 ALARM'; if (breachAlarmIds.size > 0) startBreachAlarm(); } }
+
+    var ADMIN_USER = "admin", ADMIN_PASS = "iiitdmk@ece", ADMIN_KEY = "iiitdm-authority-2026";
+    var currentUser = null, isAdmin = false;
+    function getUsers() { try { return JSON.parse(localStorage.getItem("atc_users") || "[]"); } catch (e) { return []; } }
+    function saveUsers(u) { localStorage.setItem("atc_users", JSON.stringify(u)); }
+    function getSession() { try { return JSON.parse(sessionStorage.getItem("atc_session") || "null"); } catch (e) { return null; } }
+    function switchTab(t) { document.getElementById("form-login").style.display = t === "login" ? "" : "none"; document.getElementById("form-register").style.display = t === "register" ? "" : "none"; document.getElementById("tab-login").className = "tab-btn" + (t === "login" ? " active" : ""); document.getElementById("tab-reg").className = "tab-btn" + (t === "register" ? " active" : ""); document.getElementById("login-msg").textContent = ""; document.getElementById("reg-msg").textContent = ""; }
+    function doLogin() { var u = document.getElementById("l-user").value.trim(); var p = document.getElementById("l-pass").value; var msg = document.getElementById("login-msg"); if (!u || !p) { msg.className = "login-msg err"; msg.textContent = "Fill in all fields."; return; } if (u === ADMIN_USER && p === ADMIN_PASS) { currentUser = { username: "admin", role: "admin", name: "Administrator" }; sessionStorage.setItem("atc_session", JSON.stringify(currentUser)); launchDashboard(); return; } var found = getUsers().find(function (x) { return x.username === u && x.password === p; }); if (!found) { msg.className = "login-msg err"; msg.textContent = "Invalid credentials."; return; } if (!found.approved) { msg.className = "login-msg err"; msg.textContent = "Account pending admin approval."; return; } currentUser = { username: found.username, role: "user", name: found.name }; sessionStorage.setItem("atc_session", JSON.stringify(currentUser)); launchDashboard(); }
+    function doRegister() { var name = document.getElementById("r-name").value.trim(); var u = document.getElementById("r-user").value.trim(); var email = document.getElementById("r-email").value.trim(); var p = document.getElementById("r-pass").value; var msg = document.getElementById("reg-msg"); if (!name || !u || !email || !p) { msg.className = "login-msg err"; msg.textContent = "Fill in all fields."; return; } if (u === ADMIN_USER) { msg.className = "login-msg err"; msg.textContent = "Username not available."; return; } var users = getUsers(); if (users.find(function (x) { return x.username === u; })) { msg.className = "login-msg err"; msg.textContent = "Username already taken."; return; } users.push({ username: u, password: p, name: name, email: email, approved: false }); saveUsers(users); msg.className = "login-msg ok"; msg.textContent = "✓ Request submitted! Await admin approval.";["r-name", "r-user", "r-email", "r-pass"].forEach(function (id) { document.getElementById(id).value = ""; }); }
+    function doLogout() { sessionStorage.removeItem("atc_session"); currentUser = null; isAdmin = false; document.getElementById("app").classList.add("hide"); document.getElementById("login-wrap").classList.remove("hide"); }
+    function launchDashboard() { isAdmin = (currentUser.role === "admin"); document.getElementById("login-wrap").classList.add("hide"); document.getElementById("app").classList.remove("hide"); document.getElementById("head-user-label").textContent = isAdmin ? "⬡ ADMIN" : "◎ " + currentUser.name.toUpperCase(); document.getElementById("btn-umgmt").style.display = isAdmin ? "" : "none"; if (!isAdmin) { document.getElementById("auth-controls").style.display = "none"; document.getElementById("override-controls").style.display = "none"; document.getElementById("cmd-controls").style.display = "none"; document.getElementById("joy-wrap").style.display = "none"; } else { document.getElementById("joy-wrap").style.display = "flex"; } if (!dashInit) initDashboard(); setTimeout(function () { if (map) map.invalidateSize(); }, 300); }
+    function openUmgmt() { renderUmgmt(); openModal("umgmt-modal"); }
+    function renderUmgmt() { var users = getUsers(); var pending = users.filter(function (u) { return !u.approved; }); var approved = users.filter(function (u) { return u.approved; }); var pel = document.getElementById("pending-list"); pel.innerHTML = pending.length ? pending.map(function (u) { return '<div class="umgmt-item"><div class="umgmt-info"><div class="umgmt-name">' + u.name + '</div><div class="umgmt-email">@' + u.username + ' · ' + u.email + '</div></div><div class="umgmt-btns"><button class="ubtn ubtn-ok" onclick="approveUser(\'' + u.username + '\')">✓ APPROVE</button><button class="ubtn ubtn-no" onclick="rejectUser(\'' + u.username + '\')">✗ REJECT</button></div></div>'; }).join("") : '<div style="font-size:12px;color:rgba(255,255,255,.3);text-align:center;padding:12px">No pending requests</div>'; var ael = document.getElementById("approved-list"); ael.innerHTML = approved.length ? approved.map(function (u) { return '<div class="umgmt-item"><div class="umgmt-info"><div class="umgmt-name">' + u.name + ' <span class="approved-tag">APPROVED</span></div><div class="umgmt-email">@' + u.username + ' · ' + u.email + '</div></div><div class="umgmt-btns"><button class="ubtn ubtn-del" onclick="removeUser(\'' + u.username + '\')">REMOVE</button></div></div>'; }).join("") : '<div style="font-size:12px;color:rgba(255,255,255,.3);text-align:center;padding:12px">No approved users</div>'; }
+    function approveUser(u) { var users = getUsers(); var x = users.find(function (a) { return a.username === u; }); if (x) x.approved = true; saveUsers(users); renderUmgmt(); }
+    function rejectUser(u) { saveUsers(getUsers().filter(function (x) { return x.username !== u; })); renderUmgmt(); }
+    function removeUser(u) { if (!confirm("Remove user @" + u + "?")) return; saveUsers(getUsers().filter(function (x) { return x.username !== u; })); renderUmgmt(); }
+    function openModal(id) { document.getElementById(id).classList.remove("hide"); }
+    function closeModal(id) { document.getElementById(id).classList.add("hide"); }
+    (function () { var s = getSession(); if (s) { currentUser = s; launchDashboard(); } })();
+
+    var BASE = window.location.origin;
+    function authHdr() { return { "Content-Type": "application/json", "X-Authority-Key": ADMIN_KEY }; }
+    var map, markers = {}, selectedId = null, ctrlState = {}, lastFleet = {}, seenRequests = {}, dashInit = false;
+    function initDashboard() { if (dashInit) return; dashInit = true; map = L.map("map", { zoomControl: false }).setView([15.7608, 78.0382], 16); L.tileLayer("https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png", { maxZoom: 19 }).addTo(map); L.control.zoom({ position: "topright" }).addTo(map); attachMapDrawHandlers(); fetchZones(); addLog("Fleet Control online", "ok"); poll(); pollRequests(); setInterval(poll, 1000); setInterval(pollRequests, 2000); setInterval(fetchZones, 10000); setupJoystick(); setupKeyboard(); }
+    function addLog(msg, type) { var el = document.getElementById("log-body"), d = document.createElement("div"); var t = new Date(); var ts = t.getHours().toString().padStart(2, "0") + ":" + t.getMinutes().toString().padStart(2, "0") + ":" + t.getSeconds().toString().padStart(2, "0"); d.className = "ll " + (type || "info"); d.innerHTML = '<span class="ts">' + ts + '</span><span class="msg">' + msg + '</span>'; el.insertBefore(d, el.firstChild); while (el.children.length > 25) el.removeChild(el.lastChild); }
+    function droneIcon(armed, breach, override) { var c = breach ? "#f43f5e" : override ? "#f59e0b" : "#6366f1"; var shadow = breach ? "drop-shadow(0 3px 10px rgba(244,63,94,.65))" : override ? "drop-shadow(0 3px 10px rgba(245,158,11,.55))" : "drop-shadow(0 3px 10px rgba(99,102,241,.55))"; var alert = breach ? '<circle cx="23" cy="8" r="6" fill="#f43f5e" stroke="rgba(255,255,255,0.5)" stroke-width="1"/><text x="23" y="12" text-anchor="middle" font-size="8" fill="#fff" font-weight="bold">!</text>' : ""; var svg = '<svg xmlns="http://www.w3.org/2000/svg" width="36" height="36" viewBox="0 0 34 34" style="filter:' + shadow + '"><circle cx="17" cy="17" r="14" fill="' + c + '" fill-opacity=".18" stroke="' + c + '" stroke-width="1.5" stroke-opacity=".7"/><polygon points="17,6 21,17 17,21 13,17" fill="' + c + '"/><circle cx="7" cy="7" r="2.5" fill="' + c + '" opacity=".7"/><circle cx="27" cy="7" r="2.5" fill="' + c + '" opacity=".7"/><circle cx="7" cy="27" r="2.5" fill="' + c + '" opacity=".7"/><circle cx="27" cy="27" r="2.5" fill="' + c + '" opacity=".7"/>' + alert + '</svg>'; return L.divIcon({ html: svg, iconSize: [36, 36], iconAnchor: [18, 18], className: "" }); }
+    function poll() { Promise.all([fetch(BASE + "/get_fleet"), fetch(BASE + "/control_state")]).then(function (rs) { return Promise.all([rs[0].json(), rs[1].json()]); }).then(function (data) { var prevFleet = Object.assign({}, lastFleet); lastFleet = data[0]; ctrlState = data[1]; Object.keys(prevFleet).forEach(function (id) { if (!data[0][id]) { addLog("Drone " + id + " went offline", "warn"); playOfflineBeep(); } }); renderFleet(data[0]); document.getElementById("sys-dot").style.background = "#10b981"; document.getElementById("sys-txt").textContent = "Live"; }).catch(function () { document.getElementById("sys-dot").style.background = "#f43f5e"; document.getElementById("sys-txt").textContent = "Unreachable"; }); }
+    function pollRequests() { fetch(BASE + "/pilot/requests").then(function (r) { return r.json(); }).then(function (reqs) { for (var id in reqs) { var r = reqs[id]; if (r.status === "pending" && !seenRequests[id]) { seenRequests[id] = true; showRequestCard(id); playRequestChime(); } if (r.status !== "pending") { seenRequests[id] = false; var c = document.getElementById("req-" + id); if (c) c.remove(); } } }).catch(function () { }); }
+    function showRequestCard(droneId) { var panel = document.getElementById("req-panel"), card = document.createElement("div"); card.className = "req-card"; card.id = "req-" + droneId; card.innerHTML = '<div class="req-icon">🚁</div><div class="req-text"><div class="req-drone">' + droneId + ' — FLIGHT REQUEST</div><div class="req-sub">Pilot requesting authorization to fly</div></div><div class="req-btns">' + (isAdmin ? '<button class="req-btn req-approve" onclick="quickApprove(\'' + droneId + '\')">APPROVE</button>' : '') + '<button class="req-btn req-deny" onclick="quickDeny(\'' + droneId + '\')">DENY</button></div>'; panel.appendChild(card); addLog("Flight request: " + droneId, "warn"); }
+    function quickApprove(id) { fetch(BASE + "/authority/approve/" + id, { method: "POST", headers: authHdr() }).then(function (r) { return r.json(); }).then(function () { addLog(id + " authorized", "ok"); var c = document.getElementById("req-" + id); if (c) c.remove(); seenRequests[id] = false; }).catch(function (e) { addLog("Error: " + e, "warn"); }); }
+    function quickDeny(id) { fetch(BASE + "/authority/deny/" + id, { method: "POST", headers: authHdr() }).then(function (r) { return r.json(); }).then(function () { addLog(id + " denied", "warn"); var c = document.getElementById("req-" + id); if (c) c.remove(); seenRequests[id] = false; }).catch(function (e) { addLog("Error: " + e, "warn"); }); }
+    function renderFleet(fleet) {
+      var list = document.getElementById("drone-list"), empty = document.getElementById("empty-msg"); var count = Object.keys(fleet).length, anyBr = false, brIds = []; document.getElementById("fleet-cnt").textContent = count + " drone" + (count !== 1 ? "s" : ""); var currentBreachIds = new Set(); Object.keys(markers).forEach(function (id) { if (!fleet[id] && map) { map.removeLayer(markers[id]); delete markers[id]; } }); var html = ""; for (var id in fleet) { var d = fleet[id], cs = ctrlState[id] || {}; if (cs.breach) { anyBr = true; brIds.push(id); currentBreachIds.add(id); if (!prevBreachIds.has(id)) { addLog("⚠ BREACH: " + id + " — " + cs.breach_zone, "warn"); startBreachAlarm(id); } } var mlat = parseFloat(d.lat || 0), mlon = parseFloat(d.lon || 0); if (mlat === 0 || mlon === 0) { if (markers[id] && map) { map.removeLayer(markers[id]); delete markers[id]; } } else if (map) { if (!markers[id]) { markers[id] = L.marker([mlat, mlon], { icon: droneIcon(d.armed, cs.breach, cs.override), title: id }).addTo(map).on("click", (function (did) { return function () { selectDrone(did); }; })(id)).bindPopup(popHTML(id, d)); } else { markers[id].setLatLng([mlat, mlon]); markers[id].setIcon(droneIcon(d.armed, cs.breach, cs.override)); markers[id].setPopupContent(popHTML(id, d)); } } var battLow = parseFloat(d.batt || 0) < 19.8; var cls = "d-item" + (selectedId === id ? " sel" : "") + (cs.breach ? " breach" : "") + (!cs.breach && !cs.override && cs.flight_approved ? " approved" : ""); html += '<div class="' + cls + '" onclick="selectDrone(\'' + id + '\')"><div class="di-row"><span class="di-name">' + id + '</span><span class="di-hb ' + (d.mav_hb ? "hb-ok" : "hb-lost") + '">' + (d.mav_hb ? "HB OK" : "LOST") + '</span></div><div class="di-info"><span style="color:' + (battLow ? "#f87171" : "rgba(255,255,255,0.35)") + '">BAT ' + parseFloat(d.batt || 0).toFixed(1) + 'V</span> | ALT ' + parseFloat(d.alt || 0).toFixed(1) + 'm | ' + (d.mode || "—") + '<br>' + parseFloat(d.lat || 0).toFixed(4) + ', ' + parseFloat(d.lon || 0).toFixed(4) + '</div><div class="di-tags"><span class="tag ' + (d.armed ? "tag-arm" : "tag-dis") + '">' + (d.armed ? "ARMED" : "DISARMED") + '</span>' + (cs.flight_approved ? '<span class="tag tag-ok">APPROVED</span>' : '') + (cs.breach ? '<span class="tag tag-br">BREACH</span>' : '') + (cs.override && !cs.breach ? '<span class="tag tag-ovr">OVERRIDE</span>' : '') + '</div></div>'; }
+      prevBreachIds.forEach(function (id) { if (!currentBreachIds.has(id)) stopBreachAlarm(id); }); prevBreachIds.clear(); currentBreachIds.forEach(function (id) { prevBreachIds.add(id); });
+      list.innerHTML = html; empty.style.display = count === 0 ? "block" : "none"; if (selectedId && fleet[selectedId]) updateRightPanel(selectedId, fleet[selectedId], ctrlState[selectedId] || {}); else if (selectedId && !fleet[selectedId]) { addLog("Drone " + selectedId + " offline", "warn"); deselectDrone(); } var banner = document.getElementById("breach-banner"); if (anyBr) { banner.textContent = "⚠ BREACH: " + brIds.join(", ") + " — TAKE ACTION"; banner.classList.add("show"); } else banner.classList.remove("show");
+    }
+    function popHTML(id, d) { return '<div style="line-height:1.9;min-width:130px;font-family:\'Source Sans 3\',sans-serif;color:rgba(255,255,255,.85)"><b style="color:#818cf8;font-family:\'Rajdhani\',sans-serif;font-size:14px">' + id + '</b><br>' + parseFloat(d.batt || 0).toFixed(1) + 'V · ' + parseFloat(d.alt || 0).toFixed(1) + 'm<br>' + (d.armed ? '<span style="color:#f87171;font-weight:600">ARMED</span>' : '<span style="color:rgba(255,255,255,.4)">DISARMED</span>') + ' · ' + (d.mode || "—") + '<br><span style="font-size:10px;color:rgba(255,255,255,.35);font-family:monospace">' + parseFloat(d.lat || 0).toFixed(5) + ', ' + parseFloat(d.lon || 0).toFixed(5) + '</span></div>'; }
+    function selectDrone(id) { selectedId = id; document.getElementById("rp-title").textContent = id; document.getElementById("tel-grid").style.display = "grid"; updateRightPanel(id, lastFleet[id] || {}, ctrlState[id] || {}); addLog("Selected: " + id, "info"); }
+    function deselectDrone() { selectedId = null; document.getElementById("rp-title").textContent = "SELECT A DRONE"; document.getElementById("sel-name").textContent = "— No drone selected —"; document.getElementById("tel-grid").style.display = "none"; setOsBox("wait", "NO DRONE SELECTED", "Click a drone in the left panel."); disableButtons(); }
+    function updateRightPanel(id, d, cs) { document.getElementById("sel-name").textContent = id; document.getElementById("tel-grid").style.display = "grid"; var battV = parseFloat(d.batt || 0), battLow = battV < 19.8; document.getElementById("t-mode").textContent = d.mode || "—"; document.getElementById("t-batt").textContent = battV.toFixed(1) + "V"; document.getElementById("t-batt").className = "tc-val" + (battLow ? " warn" : ""); document.getElementById("t-alt").textContent = parseFloat(d.alt || 0).toFixed(1) + "m"; document.getElementById("t-arm").textContent = d.armed ? "ARMED" : "DISARMED"; document.getElementById("t-arm").className = "tc-val" + (d.armed ? " warn" : " ok"); document.getElementById("t-pos").textContent = parseFloat(d.lat || 0).toFixed(5) + ", " + parseFloat(d.lon || 0).toFixed(5); var hasOverride = cs.override || cs.breach; if (cs.breach) setOsBox("br", "⚠ GEOFENCE BREACH", "Zone: " + (cs.breach_zone || "unknown")); else if (cs.override) setOsBox("ovr", "⚡ OVERRIDE ACTIVE", "Authority has master control."); else if (cs.flight_approved) setOsBox("appr", "✓ FLIGHT APPROVED", "Pilot cleared to fly."); else setOsBox("wait", "AWAITING REQUEST", "Pilot has not requested flight."); if (isAdmin) { document.getElementById("b-auth").disabled = cs.flight_approved || hasOverride; document.getElementById("b-deny").disabled = false; document.getElementById("b-take").disabled = hasOverride; document.getElementById("b-rel").disabled = !hasOverride; document.getElementById("b-rtl").disabled = !hasOverride; document.getElementById("b-kill").disabled = !hasOverride; document.getElementById("b-hov").disabled = !hasOverride; document.getElementById("b-land").disabled = !hasOverride; } }
+    function setOsBox(type, title, sub) { var box = document.getElementById("os-box"); box.className = "os-" + type; box.querySelector(".os-t").textContent = title; box.querySelector(".os-s").textContent = sub; }
+    function disableButtons() { ["b-auth", "b-deny", "b-take", "b-rel", "b-rtl", "b-kill", "b-hov", "b-land"].forEach(function (id) { var el = document.getElementById(id); if (el) el.disabled = true; }); }
+    function authorizeCmd() { if (!selectedId || !isAdmin) return; fetch(BASE + "/authority/approve/" + selectedId, { method: "POST", headers: authHdr() }).then(function (r) { return r.json(); }).then(function () { addLog(selectedId + " — AUTHORIZED", "ok"); }).catch(function (e) { addLog("Error: " + e, "warn"); }); }
+    function denyCmd() { if (!selectedId || !isAdmin) return; fetch(BASE + "/authority/deny/" + selectedId, { method: "POST", headers: authHdr() }).then(function (r) { return r.json(); }).then(function () { addLog(selectedId + " — DENIED", "warn"); }).catch(function (e) { addLog("Error: " + e, "warn"); }); }
+    function takeOverride() { if (!selectedId || !isAdmin) return; fetch(BASE + "/authority/override/" + selectedId, { method: "POST", headers: authHdr() }).then(function (r) { return r.json(); }).then(function () { addLog(selectedId + " — OVERRIDE TAKEN", "cmd"); }).catch(function (e) { addLog("Error: " + e, "warn"); }); }
+    function releaseOverride() { if (!selectedId || !isAdmin) return; fetch(BASE + "/authority/release/" + selectedId, { method: "POST", headers: authHdr() }).then(function (r) { return r.json(); }).then(function () { addLog(selectedId + " — RELEASED", "ok"); }).catch(function (e) { addLog("Error: " + e, "warn"); }); }
+    function authCmd(cmd) { if (!selectedId || !isAdmin) return; fetch(BASE + "/authority/" + cmd + "/" + selectedId, { headers: authHdr() }).then(function (r) { return r.json(); }).then(function () { addLog(selectedId + " — " + cmd.toUpperCase(), "cmd"); }).catch(function (e) { addLog("Error: " + e, "warn"); }); }
+    var moveSpeed = 2.0, keys = { w: 0, a: 0, s: 0, d: 0, q: 0, e: 0 }, moveInterval = null;
+    function sendMove(vx, vy, vz) { if (!selectedId || !isAdmin) return; var d = lastFleet[selectedId] || {}, cs = ctrlState[selectedId] || {}; if (!d.mav_hb || !(cs.override || cs.breach)) return; fetch(BASE + "/authority/move/" + selectedId, { method: "POST", headers: authHdr(), body: JSON.stringify({ vx: +vx.toFixed(2), vy: +vy.toFixed(2), vz: +vz.toFixed(2) }) }).catch(function () { }); document.getElementById("v-f").textContent = vx.toFixed(1); document.getElementById("v-l").textContent = vy.toFixed(1); document.getElementById("v-v").textContent = vz.toFixed(1); }
+    function setupKeyboard() { document.addEventListener("keydown", function (e) { var k = e.key.toLowerCase(); if (keys.hasOwnProperty(k)) { keys[k] = 1; e.preventDefault(); } updateKeyHighlights(); if (!moveInterval) moveInterval = setInterval(flushKeys, 120); }); document.addEventListener("keyup", function (e) { var k = e.key.toLowerCase(); if (keys.hasOwnProperty(k)) keys[k] = 0; updateKeyHighlights(); if (!Object.values(keys).some(function (v) { return v; })) { clearInterval(moveInterval); moveInterval = null; sendMove(0, 0, 0);["v-f", "v-l", "v-v"].forEach(function (id) { document.getElementById(id).textContent = "0.0"; }); } }); }
+    function flushKeys() { sendMove((keys.w - keys.s) * moveSpeed, (keys.d - keys.a) * moveSpeed, (keys.q - keys.e) * moveSpeed); }
+    function updateKeyHighlights() { var m = { w: "k-w", a: "k-a", s: "k-s", d: "k-d", q: "k-q", e: "k-e" }; for (var k in m) { var el = document.getElementById(m[k]); if (el) { if (keys[k]) el.classList.add("on"); else el.classList.remove("on"); } } }
+    function setupJoystick() { var pad = document.getElementById("joy-pad"), knob = document.getElementById("joy-knob"); var dragging = false, ox = 0, oy = 0; function onStart(e) { dragging = true; pad.classList.add("drag"); var r = pad.getBoundingClientRect(); ox = r.left + r.width / 2; oy = r.top + r.height / 2; e.preventDefault(); } function onMove(e) { if (!dragging) return; var cx = e.touches ? e.touches[0].clientX : e.clientX, cy = e.touches ? e.touches[0].clientY : e.clientY; var dx = Math.max(-40, Math.min(40, cx - ox)), dy = Math.max(-40, Math.min(40, cy - oy)); knob.style.transform = "translate(calc(-50% + " + dx + "px), calc(-50% + " + dy + "px))"; sendMove((dy / 40) * moveSpeed, (dx / 40) * moveSpeed, 0); } function onEnd() { dragging = false; pad.classList.remove("drag"); knob.style.transform = "translate(-50%,-50%)"; sendMove(0, 0, 0);["v-f", "v-l"].forEach(function (id) { document.getElementById(id).textContent = "0.0"; }); } pad.addEventListener("mousedown", onStart); pad.addEventListener("touchstart", onStart, { passive: false }); document.addEventListener("mousemove", onMove); document.addEventListener("touchmove", onMove, { passive: false }); document.addEventListener("mouseup", onEnd); document.addEventListener("touchend", onEnd); }
+    var liveZones = {}, zoneRects = {}, drawMode = false, drawStart = null, drawRect = null;
+    function fetchZones() { fetch(BASE + "/geofence/zones").then(function (r) { return r.json(); }).then(function (zones) { liveZones = zones; renderZoneList(); renderZoneMap(); }).catch(function () { }); }
+    function renderZoneList() { var el = document.getElementById("zone-list"); if (!liveZones.length) { el.innerHTML = '<div style="font-size:10px;color:rgba(255,255,255,.25);text-align:center;padding:6px">No zones defined</div>'; return; } el.innerHTML = liveZones.map(function (z) { return '<div style="background:linear-gradient(135deg,rgba(255,255,255,.08),rgba(255,255,255,.03));backdrop-filter:blur(12px);border-top:1px solid rgba(255,255,255,.18);border-left:1px solid rgba(255,255,255,.1);border-radius:12px;padding:8px 11px;display:flex;justify-content:space-between;align-items:center;box-shadow:0 3px 12px rgba(0,0,0,.2)">' + '<div><div style="font-size:11px;font-weight:700;color:#f87171;font-family:var(--display)">' + z.id + ': ' + z.label + '</div>' + '<div style="font-size:9px;color:rgba(255,255,255,.3);margin-top:2px;font-family:var(--mono)">' + z.lat_min.toFixed(5) + '→' + z.lat_max.toFixed(5) + ' / ' + z.lon_min.toFixed(5) + '→' + z.lon_max.toFixed(5) + '</div></div>' + (isAdmin ? '<button onclick="deleteZone(\'' + z.id + '\')" style="background:rgba(244,63,94,.15);backdrop-filter:blur(8px);border:1px solid rgba(244,63,94,.3);border-radius:8px;color:#f87171;font-size:9px;cursor:pointer;padding:3px 8px;font-family:var(--mono)">DEL</button>' : '') + '</div>'; }).join(""); }
+    function renderZoneMap() { if (!map) return; Object.values(zoneRects).forEach(function (r) { map.removeLayer(r); }); zoneRects = {}; liveZones.forEach(function (z) { var r = L.rectangle([[z.lat_min, z.lon_min], [z.lat_max, z.lon_max]], { color: "#f43f5e", weight: 1.5, dashArray: "5,4", fillOpacity: .07 }).addTo(map).bindTooltip("⛔ " + z.id + ": " + z.label, { permanent: true, direction: "center" }); zoneRects[z.id] = r; }); }
+    function addZone() { if (!isAdmin) { alert("Admin only."); return; } var label = document.getElementById("zf-label").value.trim(); var latmin = parseFloat(document.getElementById("zf-latmin").value); var latmax = parseFloat(document.getElementById("zf-latmax").value); var lonmin = parseFloat(document.getElementById("zf-lonmin").value); var lonmax = parseFloat(document.getElementById("zf-lonmax").value); if (!label) { showZoneErr("Label required"); return; } if (isNaN(latmin) || isNaN(latmax) || isNaN(lonmin) || isNaN(lonmax)) { showZoneErr("All 4 coordinates required"); return; } if (latmin >= latmax) { showZoneErr("Lat min < lat max"); return; } if (lonmin >= lonmax) { showZoneErr("Lon min < lon max"); return; } fetch(BASE + "/geofence/add", { method: "POST", headers: authHdr(), body: JSON.stringify({ label: label, lat_min: latmin, lat_max: latmax, lon_min: lonmin, lon_max: lonmax }) }).then(function (r) { return r.json(); }).then(function (j) { if (j.status === "added") { addLog("Zone " + j.zone.id + " added", "ok");["zf-label", "zf-latmin", "zf-latmax", "zf-lonmin", "zf-lonmax"].forEach(function (id) { document.getElementById(id).value = ""; }); document.getElementById("zf-err").style.display = "none"; fetchZones(); } else showZoneErr(j.reason || JSON.stringify(j)); }).catch(function (e) { showZoneErr("Error: " + e); }); }
+    function deleteZone(zoneId) { if (!isAdmin) return; if (!confirm("Delete zone " + zoneId + "?")) return; fetch(BASE + "/geofence/delete/" + zoneId, { method: "POST", headers: authHdr() }).then(function (r) { return r.json(); }).then(function (j) { if (j.status === "deleted") { addLog("Zone " + zoneId + " deleted", "warn"); fetchZones(); } }).catch(function (e) { alert("Error: " + e); }); }
+    function showZoneErr(msg) { var e = document.getElementById("zf-err"); e.textContent = msg; e.style.display = "block"; }
+    function attachMapDrawHandlers() { map.on("click", function (e) { if (!drawMode) return; if (!drawStart) { drawStart = e.latlng; addLog("First corner set", "info"); drawRect = L.rectangle([drawStart, drawStart], { color: "#6366f1", weight: 1.5, dashArray: "3,3", fillOpacity: .05 }).addTo(map); } else { var lat1 = Math.min(drawStart.lat, e.latlng.lat), lat2 = Math.max(drawStart.lat, e.latlng.lat), lon1 = Math.min(drawStart.lng, e.latlng.lng), lon2 = Math.max(drawStart.lng, e.latlng.lng); document.getElementById("zf-latmin").value = lat1.toFixed(6); document.getElementById("zf-latmax").value = lat2.toFixed(6); document.getElementById("zf-lonmin").value = lon1.toFixed(6); document.getElementById("zf-lonmax").value = lon2.toFixed(6); cancelDrawZone(); addLog("Coordinates filled", "info"); document.getElementById("col-right").scrollTop = 99999; } }); map.on("mousemove", function (e) { if (!drawMode || !drawStart || !drawRect) return; drawRect.setBounds([drawStart, e.latlng]); }); }
+    function startDrawZone() { if (!map || !isAdmin) return; drawMode = true; drawStart = null; if (drawRect) { map.removeLayer(drawRect); drawRect = null; } map.getContainer().style.cursor = "crosshair"; addLog("Click: first corner", "info"); var b = document.getElementById("b-draw-zone"); b.textContent = "✖ CANCEL"; b.onclick = cancelDrawZone; }
+    function cancelDrawZone() { drawMode = false; drawStart = null; if (drawRect) { map.removeLayer(drawRect); drawRect = null; } map.getContainer().style.cursor = ""; var b = document.getElementById("b-draw-zone"); b.textContent = "✎ DRAW ON MAP"; b.onclick = startDrawZone; }
+    document.addEventListener("keydown", function (e) { if (e.key === "Enter" && document.getElementById("login-wrap") && !document.getElementById("login-wrap").classList.contains("hide")) { if (document.getElementById("form-register").style.display !== "none") doRegister(); else doLogin(); } });
+  </script>
+</body>
+
+</html>

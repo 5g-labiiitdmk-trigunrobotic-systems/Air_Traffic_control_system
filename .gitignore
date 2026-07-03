@@ -1,0 +1,6 @@
+__pycache__/
+*.pyc
+app_backup*.py
+state_backup.json
+current_tunnel_url.txt
+drone.txt
