@@ -37,6 +37,10 @@ import sys
 import os
 import requests
 
+# Fix windows console unicode errors
+if sys.stdout.encoding != 'utf-8':
+    sys.stdout.reconfigure(encoding='utf-8')
+
 # ── !! FILL THESE IN ONCE !! ─────────────────────────────────────────────────
 GITHUB_TOKEN = "PASTE_YOUR_NEW_TOKEN_HERE"
 GIST_ID      = "71775a92c0a67d79d6974ad1e7fd83e8"
