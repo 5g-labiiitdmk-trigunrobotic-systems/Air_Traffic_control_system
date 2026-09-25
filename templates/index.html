@@ -885,6 +885,46 @@
       }
     }
 
+    #arm-banner {
+      display: none;
+      padding: 6px 14px;
+      background: rgba(245, 158, 11, .15);
+      backdrop-filter: blur(8px);
+      border-bottom: 2px solid rgba(245, 158, 11, .6);
+      font-size: 10px;
+      font-weight: 700;
+      color: #fbbf24;
+      text-align: center;
+      flex-shrink: 0;
+      letter-spacing: .3px
+    }
+
+    #arm-banner.show {
+      display: block;
+      animation: blink-bg-arm 1s infinite
+    }
+
+    @keyframes blink-bg-arm {
+
+      0%,
+      100% {
+        background: rgba(245, 158, 11, .12)
+      }
+
+      50% {
+        background: rgba(245, 158, 11, .25)
+      }
+    }
+
+    .arm-flash {
+      animation: armFlash 0.4s ease 3;
+    }
+
+    @keyframes armFlash {
+      0%,100% { border-color: rgba(244,63,94,.6); }
+      50% { background: rgba(244,63,94,.25); border-color: rgba(244,63,94,.9); }
+    }
+
     #drone-list {
       flex: 1;
       overflow-y: auto;
@@ -2028,6 +2068,7 @@
           <div class="col-title">DRONE FLEET CONTROL</div>
         </div>
         <div id="breach-banner">⚠ GEOFENCE BREACH — TAKE ACTION</div>
+        <div id="arm-banner"></div>
         <div id="drone-list"></div>
         <div id="empty-msg">
           <div class="empty-icon">🚁</div>No drones online.<br>Waiting for telemetry…
@@ -2189,6 +2230,7 @@
     function playBreachAlarm() { if (!alarmEnabled) return; var t = getACtx().currentTime; _tone(960, t, 0.18, 'sawtooth', 0.25); _tone(720, t + 0.2, 0.18, 'sawtooth', 0.22); _tone(960, t + 0.4, 0.18, 'sawtooth', 0.25); _tone(720, t + 0.6, 0.18, 'sawtooth', 0.22); _tone(480, t + 0.85, 0.12, 'square', 0.15); }
     function playRequestChime() { if (!alarmEnabled) return; var t = getACtx().currentTime; _tone(523, t, 0.12, 'sine', 0.12); _tone(659, t + 0.13, 0.12, 'sine', 0.12); _tone(784, t + 0.26, 0.18, 'sine', 0.10); }
     function playOfflineBeep() { if (!alarmEnabled) return; var t = getACtx().currentTime; _tone(330, t, 0.1, 'sine', 0.1); _tone(220, t + 0.12, 0.18, 'sine', 0.1); }
+    function playArmAlert() { if (!alarmEnabled) return; var t = getACtx().currentTime; _tone(440, t, 0.15, 'sine', 0.2); _tone(660, t + 0.16, 0.15, 'sine', 0.2); _tone(880, t + 0.32, 0.15, 'sine', 0.2); }
     function startBreachAlarm(id) { breachAlarmIds.add(id); if (alarmActive) return; alarmActive = true; document.getElementById('alarm-flash').classList.add('active'); var btn = document.getElementById('alarm-toggle'); btn.className = 'head-btn-alarm alarming'; btn.textContent = '🚨 BREACH'; playBreachAlarm(); alarmInterval = setInterval(playBreachAlarm, 2200); }
     function stopBreachAlarm(id) { if (id) breachAlarmIds.delete(id); if (breachAlarmIds.size > 0) return; alarmActive = false; if (alarmInterval) { clearInterval(alarmInterval); alarmInterval = null; } document.getElementById('alarm-flash').classList.remove('active'); var btn = document.getElementById('alarm-toggle'); btn.className = alarmEnabled ? 'head-btn-alarm' : 'head-btn-alarm muted'; btn.textContent = alarmEnabled ? '🔔 ALARM' : '🔕 ALARM'; }
     function toggleAlarm() { alarmEnabled = !alarmEnabled; var btn = document.getElementById('alarm-toggle'); if (!alarmEnabled) { if (alarmInterval) { clearInterval(alarmInterval); alarmInterval = null; } document.getElementById('alarm-flash').classList.remove('active'); btn.className = 'head-btn-alarm muted'; btn.textContent = '🔕 ALARM'; alarmActive = false; } else { btn.className = 'head-btn-alarm'; btn.textContent = '🔔 ALARM'; if (breachAlarmIds.size > 0) startBreachAlarm(); } }
@@ -2218,15 +2260,27 @@
     function initDashboard() { if (dashInit) return; dashInit = true; map = L.map("map", { zoomControl: false }).setView([15.7608, 78.0382], 16); L.tileLayer("https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png", { maxZoom: 19 }).addTo(map); L.control.zoom({ position: "topright" }).addTo(map); attachMapDrawHandlers(); fetchZones(); addLog("Fleet Control online", "ok"); poll(); pollRequests(); setInterval(poll, 1000); setInterval(pollRequests, 2000); setInterval(fetchZones, 10000); setupJoystick(); setupKeyboard(); }
     function addLog(msg, type) { var el = document.getElementById("log-body"), d = document.createElement("div"); var t = new Date(); var ts = t.getHours().toString().padStart(2, "0") + ":" + t.getMinutes().toString().padStart(2, "0") + ":" + t.getSeconds().toString().padStart(2, "0"); d.className = "ll " + (type || "info"); d.innerHTML = '<span class="ts">' + ts + '</span><span class="msg">' + msg + '</span>'; el.insertBefore(d, el.firstChild); while (el.children.length > 25) el.removeChild(el.lastChild); }
     function droneIcon(armed, breach, override) { var c = breach ? "#f43f5e" : override ? "#f59e0b" : "#6366f1"; var shadow = breach ? "drop-shadow(0 3px 10px rgba(244,63,94,.65))" : override ? "drop-shadow(0 3px 10px rgba(245,158,11,.55))" : "drop-shadow(0 3px 10px rgba(99,102,241,.55))"; var alert = breach ? '<circle cx="23" cy="8" r="6" fill="#f43f5e" stroke="rgba(255,255,255,0.5)" stroke-width="1"/><text x="23" y="12" text-anchor="middle" font-size="8" fill="#fff" font-weight="bold">!</text>' : ""; var svg = '<svg xmlns="http://www.w3.org/2000/svg" width="36" height="36" viewBox="0 0 34 34" style="filter:' + shadow + '"><circle cx="17" cy="17" r="14" fill="' + c + '" fill-opacity=".18" stroke="' + c + '" stroke-width="1.5" stroke-opacity=".7"/><polygon points="17,6 21,17 17,21 13,17" fill="' + c + '"/><circle cx="7" cy="7" r="2.5" fill="' + c + '" opacity=".7"/><circle cx="27" cy="7" r="2.5" fill="' + c + '" opacity=".7"/><circle cx="7" cy="27" r="2.5" fill="' + c + '" opacity=".7"/><circle cx="27" cy="27" r="2.5" fill="' + c + '" opacity=".7"/>' + alert + '</svg>'; return L.divIcon({ html: svg, iconSize: [36, 36], iconAnchor: [18, 18], className: "" }); }
-    function poll() { Promise.all([fetch(BASE + "/get_fleet"), fetch(BASE + "/control_state")]).then(function (rs) { return Promise.all([rs[0].json(), rs[1].json()]); }).then(function (data) { var prevFleet = Object.assign({}, lastFleet); lastFleet = data[0]; ctrlState = data[1]; Object.keys(prevFleet).forEach(function (id) { if (!data[0][id]) { addLog("Drone " + id + " went offline", "warn"); playOfflineBeep(); } }); renderFleet(data[0]); document.getElementById("sys-dot").style.background = "#10b981"; document.getElementById("sys-txt").textContent = "Live"; }).catch(function () { document.getElementById("sys-dot").style.background = "#f43f5e"; document.getElementById("sys-txt").textContent = "Unreachable"; }); }
+    function poll() { Promise.all([fetch(BASE + "/get_fleet"), fetch(BASE + "/control_state")]).then(function (rs) { return Promise.all([rs[0].json(), rs[1].json()]); }).then(function (data) { var prevFleet = Object.assign({}, lastFleet); ctrlState = data[1]; Object.keys(prevFleet).forEach(function (id) { if (!data[0][id]) { addLog("Drone " + id + " went offline", "warn"); playOfflineBeep(); } }); renderFleet(data[0]); lastFleet = data[0]; document.getElementById("sys-dot").style.background = "#10b981"; document.getElementById("sys-txt").textContent = "Live"; }).catch(function () { document.getElementById("sys-dot").style.background = "#f43f5e"; document.getElementById("sys-txt").textContent = "Unreachable"; }); }
     function pollRequests() { fetch(BASE + "/pilot/requests").then(function (r) { return r.json(); }).then(function (reqs) { for (var id in reqs) { var r = reqs[id]; if (r.status === "pending" && !seenRequests[id]) { seenRequests[id] = true; showRequestCard(id); playRequestChime(); } if (r.status !== "pending") { seenRequests[id] = false; var c = document.getElementById("req-" + id); if (c) c.remove(); } } }).catch(function () { }); }
     function showRequestCard(droneId) { var panel = document.getElementById("req-panel"), card = document.createElement("div"); card.className = "req-card"; card.id = "req-" + droneId; card.innerHTML = '<div class="req-icon">🚁</div><div class="req-text"><div class="req-drone">' + droneId + ' — FLIGHT REQUEST</div><div class="req-sub">Pilot requesting authorization to fly</div></div><div class="req-btns">' + (isAdmin ? '<button class="req-btn req-approve" onclick="quickApprove(\'' + droneId + '\')">APPROVE</button>' : '') + '<button class="req-btn req-deny" onclick="quickDeny(\'' + droneId + '\')">DENY</button></div>'; panel.appendChild(card); addLog("Flight request: " + droneId, "warn"); }
     function quickApprove(id) { fetch(BASE + "/authority/approve/" + id, { method: "POST", headers: authHdr() }).then(function (r) { return r.json(); }).then(function () { addLog(id + " authorized", "ok"); var c = document.getElementById("req-" + id); if (c) c.remove(); seenRequests[id] = false; }).catch(function (e) { addLog("Error: " + e, "warn"); }); }
     function quickDeny(id) { fetch(BASE + "/authority/deny/" + id, { method: "POST", headers: authHdr() }).then(function (r) { return r.json(); }).then(function () { addLog(id + " denied", "warn"); var c = document.getElementById("req-" + id); if (c) c.remove(); seenRequests[id] = false; }).catch(function (e) { addLog("Error: " + e, "warn"); }); }
     function renderFleet(fleet) {
-      var list = document.getElementById("drone-list"), empty = document.getElementById("empty-msg"); var count = Object.keys(fleet).length, anyBr = false, brIds = []; document.getElementById("fleet-cnt").textContent = count + " drone" + (count !== 1 ? "s" : ""); var currentBreachIds = new Set(); Object.keys(markers).forEach(function (id) { if (!fleet[id] && map) { map.removeLayer(markers[id]); delete markers[id]; } }); var html = ""; for (var id in fleet) { var d = fleet[id], cs = ctrlState[id] || {}; if (cs.breach) { anyBr = true; brIds.push(id); currentBreachIds.add(id); if (!prevBreachIds.has(id)) { addLog("⚠ BREACH: " + id + " — " + cs.breach_zone, "warn"); startBreachAlarm(id); } } var mlat = parseFloat(d.lat || 0), mlon = parseFloat(d.lon || 0); if (mlat === 0 || mlon === 0) { if (markers[id] && map) { map.removeLayer(markers[id]); delete markers[id]; } } else if (map) { if (!markers[id]) { markers[id] = L.marker([mlat, mlon], { icon: droneIcon(d.armed, cs.breach, cs.override), title: id }).addTo(map).on("click", (function (did) { return function () { selectDrone(did); }; })(id)).bindPopup(popHTML(id, d)); } else { markers[id].setLatLng([mlat, mlon]); markers[id].setIcon(droneIcon(d.armed, cs.breach, cs.override)); markers[id].setPopupContent(popHTML(id, d)); } } var battLow = parseFloat(d.batt || 0) < 19.8; var cls = "d-item" + (selectedId === id ? " sel" : "") + (cs.breach ? " breach" : "") + (!cs.breach && !cs.override && cs.flight_approved ? " approved" : ""); html += '<div class="' + cls + '" onclick="selectDrone(\'' + id + '\')"><div class="di-row"><span class="di-name">' + id + '</span><span class="di-hb ' + (d.mav_hb ? "hb-ok" : "hb-lost") + '">' + (d.mav_hb ? "HB OK" : "LOST") + '</span></div><div class="di-info"><span style="color:' + (battLow ? "#f87171" : "rgba(255,255,255,0.35)") + '">BAT ' + parseFloat(d.batt || 0).toFixed(1) + 'V</span> | ALT ' + parseFloat(d.alt || 0).toFixed(1) + 'm | ' + (d.mode || "—") + '<br>' + parseFloat(d.lat || 0).toFixed(4) + ', ' + parseFloat(d.lon || 0).toFixed(4) + '</div><div class="di-tags"><span class="tag ' + (d.armed ? "tag-arm" : "tag-dis") + '">' + (d.armed ? "ARMED" : "DISARMED") + '</span>' + (cs.flight_approved ? '<span class="tag tag-ok">APPROVED</span>' : '') + (cs.breach ? '<span class="tag tag-br">BREACH</span>' : '') + (cs.override && !cs.breach ? '<span class="tag tag-ovr">OVERRIDE</span>' : '') + '</div></div>'; }
+      var list = document.getElementById("drone-list"), empty = document.getElementById("empty-msg"); var count = Object.keys(fleet).length, anyBr = false, brIds = []; document.getElementById("fleet-cnt").textContent = count + " drone" + (count !== 1 ? "s" : ""); var currentBreachIds = new Set(); Object.keys(markers).forEach(function (id) { if (!fleet[id] && map) { map.removeLayer(markers[id]); delete markers[id]; } }); var html = "", newlyArmedIds = []; for (var id in fleet) { var d = fleet[id], cs = ctrlState[id] || {}; if (cs.breach) { anyBr = true; brIds.push(id); currentBreachIds.add(id); if (!prevBreachIds.has(id)) { addLog("⚠ BREACH: " + id + " — " + cs.breach_zone, "warn"); startBreachAlarm(id); } } var mlat = parseFloat(d.lat || 0), mlon = parseFloat(d.lon || 0); if (mlat === 0 || mlon === 0) { if (markers[id] && map) { map.removeLayer(markers[id]); delete markers[id]; } } else if (map) { if (!markers[id]) { markers[id] = L.marker([mlat, mlon], { icon: droneIcon(d.armed, cs.breach, cs.override), title: id }).addTo(map).on("click", (function (did) { return function () { selectDrone(did); }; })(id)).bindPopup(popHTML(id, d)); } else { markers[id].setLatLng([mlat, mlon]); markers[id].setIcon(droneIcon(d.armed, cs.breach, cs.override)); markers[id].setPopupContent(popHTML(id, d)); } } var wasArmed = lastFleet[id] && lastFleet[id].armed; var nowArmed = d.armed; if (!wasArmed && nowArmed) { playArmAlert(); newlyArmedIds.push(id); } var battLow = parseFloat(d.batt || 0) < 19.8; var cls = "d-item" + (selectedId === id ? " sel" : "") + (cs.breach ? " breach" : "") + (!cs.breach && !cs.override && cs.flight_approved ? " approved" : ""); html += '<div class="' + cls + '" id="d-item-' + id + '" onclick="selectDrone(\'' + id + '\')"><div class="di-row"><span class="di-name">' + id + '</span><span class="di-hb ' + (d.mav_hb ? "hb-ok" : "hb-lost") + '">' + (d.mav_hb ? "HB OK" : "LOST") + '</span></div><div class="di-info"><span style="color:' + (battLow ? "#f87171" : "rgba(255,255,255,0.35)") + '">BAT ' + parseFloat(d.batt || 0).toFixed(1) + 'V</span> | ALT ' + parseFloat(d.alt || 0).toFixed(1) + 'm | ' + (d.mode || "—") + '<br>' + parseFloat(d.lat || 0).toFixed(4) + ', ' + parseFloat(d.lon || 0).toFixed(4) + '</div><div class="di-tags"><span class="tag ' + (d.armed ? "tag-arm" : "tag-dis") + '">' + (d.armed ? "ARMED" : "DISARMED") + '</span>' + (cs.flight_approved ? '<span class="tag tag-ok">APPROVED</span>' : '') + (cs.breach ? '<span class="tag tag-br">BREACH</span>' : '') + (cs.override && !cs.breach ? '<span class="tag tag-ovr">OVERRIDE</span>' : '') + '</div></div>'; }
       prevBreachIds.forEach(function (id) { if (!currentBreachIds.has(id)) stopBreachAlarm(id); }); prevBreachIds.clear(); currentBreachIds.forEach(function (id) { prevBreachIds.add(id); });
       list.innerHTML = html; empty.style.display = count === 0 ? "block" : "none"; if (selectedId && fleet[selectedId]) updateRightPanel(selectedId, fleet[selectedId], ctrlState[selectedId] || {}); else if (selectedId && !fleet[selectedId]) { addLog("Drone " + selectedId + " offline", "warn"); deselectDrone(); } var banner = document.getElementById("breach-banner"); if (anyBr) { banner.textContent = "⚠ BREACH: " + brIds.join(", ") + " — TAKE ACTION"; banner.classList.add("show"); } else banner.classList.remove("show");
+      newlyArmedIds.forEach(function (id) { triggerArmWarning(id); });
+    }
+    var armBannerTimeout = null;
+    function triggerArmWarning(droneId) {
+      var card = document.getElementById("d-item-" + droneId);
+      if (card) { card.classList.add("arm-flash"); card.addEventListener("animationend", function onEnd() { card.classList.remove("arm-flash"); card.removeEventListener("animationend", onEnd); }); }
+      var banner = document.getElementById("arm-banner");
+      banner.textContent = "⚠ ARMING: " + droneId + " — Drone is arming up";
+      banner.classList.add("show");
+      if (armBannerTimeout) clearTimeout(armBannerTimeout);
+      armBannerTimeout = setTimeout(function () { banner.classList.remove("show"); armBannerTimeout = null; }, 8000);
+      addLog("⚠ ARMING: " + droneId + " — drone armed up", "warn");
     }
     function popHTML(id, d) { return '<div style="line-height:1.9;min-width:130px;font-family:\'Source Sans 3\',sans-serif;color:rgba(255,255,255,.85)"><b style="color:#818cf8;font-family:\'Rajdhani\',sans-serif;font-size:14px">' + id + '</b><br>' + parseFloat(d.batt || 0).toFixed(1) + 'V · ' + parseFloat(d.alt || 0).toFixed(1) + 'm<br>' + (d.armed ? '<span style="color:#f87171;font-weight:600">ARMED</span>' : '<span style="color:rgba(255,255,255,.4)">DISARMED</span>') + ' · ' + (d.mode || "—") + '<br><span style="font-size:10px;color:rgba(255,255,255,.35);font-family:monospace">' + parseFloat(d.lat || 0).toFixed(5) + ', ' + parseFloat(d.lon || 0).toFixed(5) + '</span></div>'; }
     function selectDrone(id) { selectedId = id; document.getElementById("rp-title").textContent = id; document.getElementById("tel-grid").style.display = "grid"; updateRightPanel(id, lastFleet[id] || {}, ctrlState[id] || {}); addLog("Selected: " + id, "info"); }
