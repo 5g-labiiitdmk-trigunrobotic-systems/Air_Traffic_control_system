@@ -1,5 +1,143 @@
 #include <ESP32Servo.h>
 
+// ─────────────────────────────────────────────────────────────────────────
+// ARM-REQUEST/APPROVAL BLOCK — TEMPLATE, NOT VERIFIED AGAINST REAL HARDWARE
+// This file had no MAVLink/WiFi code at all before this addition (it was a
+// standalone PWM-triggered servo sketch). Everything below is a best-guess
+// scaffold using the standard MAVLink C library + ESP32 WiFi/HTTPClient
+// conventions. Before this will compile/run you must:
+//   1. Drop the generated `common/mavlink.h` (from the mavlink/mavlink
+//      generator) into the empty drone2/mavlink/ folder and #include it.
+//   2. Confirm which UART the flight controller's telemetry port is wired
+//      to (assumed Serial2, RX2=16/TX2=17, 57600 baud below) and fix pins.
+//   3. Fill in WIFI_SSID/WIFI_PASS/SERVER_IP/DRONE_ID for your network.
+//   4. Confirm mavlink_msg_command_long_pack's target_system/target_component
+//      match your FC (assumed 1/1 below).
+// ─────────────────────────────────────────────────────────────────────────
+#include <WiFi.h>
+#include <HTTPClient.h>
+// #include "mavlink/common/mavlink.h"   // <-- place generated headers here, then uncomment
+
+const char* WIFI_SSID   = "YOUR_WIFI_SSID";
+const char* WIFI_PASS   = "YOUR_WIFI_PASS";
+const char* SERVER_IP   = "192.168.1.100";     // Flask server IP
+const int   SERVER_PORT = 5000;
+const char* DRONE_ID    = "Drone-1";
+
+#define MAVLINK_SERIAL   Serial2
+#define MAVLINK_BAUD     57600
+#define FC_SYSID         1
+#define FC_COMPID        1
+
+bool armPending = false;
+unsigned long armPollTimer   = 0;
+unsigned long armWaitStarted = 0;
+const unsigned long ARM_POLL_INTERVAL_MS = 500;
+const unsigned long ARM_WAIT_TIMEOUT_MS  = 30000;
+
+String armServerUrl(const char* path) {
+  return "http://" + String(SERVER_IP) + ":" + String(SERVER_PORT) + path;
+}
+
+void sendArmRequest() {
+  HTTPClient http;
+  http.begin(armServerUrl("/drone/arm_request"));
+  http.addHeader("Content-Type", "application/json");
+  String body = String("{\"drone_id\":\"") + DRONE_ID + "\"}";
+  http.POST(body);
+  http.end();
+}
+
+String pollArmPermission() {
+  HTTPClient http;
+  http.begin(armServerUrl((String("/drone/poll_arm_permission/") + DRONE_ID).c_str()));
+  int code = http.GET();
+  String status = "none";
+  if (code == 200) {
+    String payload = http.getString();
+    if (payload.indexOf("\"approved\"") >= 0) status = "approved";
+    else if (payload.indexOf("\"denied\"")  >= 0) status = "denied";
+    else if (payload.indexOf("\"pending\"") >= 0) status = "pending";
+  }
+  http.end();
+  return status;
+}
+
+// Forwards MAV_CMD_COMPONENT_ARM_DISARM to the FC. arm=true to arm, false to disarm.
+void forwardArmCommandToFC(bool arm) {
+  mavlink_message_t msg;
+  mavlink_msg_command_long_pack(255, 0, &msg, FC_SYSID, FC_COMPID,
+                                 MAV_CMD_COMPONENT_ARM_DISARM, 0,
+                                 arm ? 1.0f : 0.0f, 0, 0, 0, 0, 0, 0);
+  uint8_t buf[MAVLINK_MAX_PACKET_LEN];
+  uint16_t len = mavlink_msg_to_send_buffer(buf, &msg);
+  MAVLINK_SERIAL.write(buf, len);
+}
+
+// Call once per loop() iteration. Non-blocking: reads whatever MAVLink
+// bytes are available, watches for an arm attempt, and while armPending is
+// true, polls Flask every 500ms (respecting a 30s safety timeout).
+void pollAndHandleArming() {
+  while (MAVLINK_SERIAL.available()) {
+    uint8_t c = MAVLINK_SERIAL.read();
+    mavlink_message_t msg;
+    mavlink_status_t status;
+    if (mavlink_parse_char(MAVLINK_COMM_0, c, &msg, &status)) {
+      if (!armPending) {
+        if (msg.msgid == MAVLINK_MSG_ID_HEARTBEAT) {
+          mavlink_heartbeat_t hb;
+          mavlink_msg_heartbeat_decode(&msg, &hb);
+          bool fcArmed = hb.base_mode & MAV_MODE_FLAG_SAFETY_ARMED;
+          if (fcArmed) {
+            armPending = true;
+            armWaitStarted = millis();
+            armPollTimer = millis();
+            sendArmRequest();
+            Serial.println("[ARM] Intercepted HEARTBEAT armed=true -> holding, requesting authority");
+          }
+        } else if (msg.msgid == MAVLINK_MSG_ID_COMMAND_LONG) {
+          mavlink_command_long_t cmd;
+          mavlink_msg_command_long_decode(&msg, &cmd);
+          if (cmd.command == MAV_CMD_COMPONENT_ARM_DISARM && cmd.param1 == 1) {
+            armPending = true;
+            armWaitStarted = millis();
+            armPollTimer = millis();
+            sendArmRequest();
+            Serial.println("[ARM] Intercepted COMMAND_LONG arm request -> holding, requesting authority");
+          }
+        }
+      }
+    }
+  }
+
+  if (armPending) {
+    unsigned long now = millis();
+    if (now - armWaitStarted > ARM_WAIT_TIMEOUT_MS) {
+      Serial.println("[ARM] Timed out waiting for authority -> auto-deny, disarming");
+      forwardArmCommandToFC(false);
+      armPending = false;
+      return;
+    }
+    if (now - armPollTimer >= ARM_POLL_INTERVAL_MS) {
+      armPollTimer = now;
+      String status = pollArmPermission();
+      if (status == "approved") {
+        Serial.println("[ARM] Authority approved -> forwarding arm to FC");
+        forwardArmCommandToFC(true);
+        armPending = false;
+      } else if (status == "denied") {
+        Serial.println("[ARM] Authority denied -> disarming FC");
+        forwardArmCommandToFC(false);
+        armPending = false;
+      }
+      // "pending"/"none" -> keep waiting, non-blocking
+    }
+  }
+}
+// ─────────────────────────────────────────────────────────────────────────
+// END ARM-REQUEST/APPROVAL BLOCK
+// ─────────────────────────────────────────────────────────────────────────
+
 const int triggerPin = 34;
 const int servoPin   = 18;
 
@@ -31,6 +169,19 @@ const int requiredConsistent = 5; // require 5 matching readings before acting
 
 void setup() {
   Serial.begin(115200);
+
+  // ── ARM-REQUEST/APPROVAL BLOCK setup — template, see notes above ──
+  MAVLINK_SERIAL.begin(MAVLINK_BAUD);
+  WiFi.begin(WIFI_SSID, WIFI_PASS);
+  Serial.print("[ARM] Connecting to WiFi");
+  unsigned long wifiStart = millis();
+  while (WiFi.status() != WL_CONNECTED && millis() - wifiStart < 15000) {
+    delay(300);
+    Serial.print(".");
+  }
+  Serial.println(WiFi.status() == WL_CONNECTED ? " connected" : " FAILED (continuing offline)");
+  // ── end ARM-REQUEST/APPROVAL BLOCK setup ──
+
   pinMode(triggerPin, INPUT);
   attachInterrupt(digitalPinToInterrupt(triggerPin), handleInterrupt, CHANGE);
 
@@ -48,6 +199,8 @@ void setup() {
 }
 
 void loop() {
+  pollAndHandleArming(); // ARM-REQUEST/APPROVAL BLOCK — template, see notes above
+
   if (newPulse) {
     newPulse = false;
     bool reading = pulseWidth > (unsigned long)triggerThreshold;
