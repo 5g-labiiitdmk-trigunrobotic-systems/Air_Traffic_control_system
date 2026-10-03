@@ -138,6 +138,7 @@ def update():
     if not drone_id:
         return jsonify({"status":"no_id"}), 400
 
+    print(f"[UPDATE] {drone_id} â† telemetry from {request.remote_addr}")
     with lock:
         data["last_seen"] = time.time()
         fleet_data[drone_id] = data
