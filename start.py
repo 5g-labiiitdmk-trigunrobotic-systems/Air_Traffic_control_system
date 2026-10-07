@@ -35,6 +35,10 @@ import time
 import re
 import sys
 import os
+import socket
+import json
+import urllib.request
+import urllib.error
 import requests
 
 # Fix windows console unicode errors
@@ -47,6 +51,11 @@ GIST_ID      = "71775a92c0a67d79d6974ad1e7fd83e8"
 # ─────────────────────────────────────────────────────────────────────────────
 
 GIST_FILE = "drone_server.txt"
+
+# ── Local-IP Gist update (LAN discovery, no tunnel needed) ──────────────────
+GIST_FILENAME = "drone_server.txt"  # same gist/file as GIST_FILE above
+SERVER_PORT   = 5000
+# ─────────────────────────────────────────────────────────────────────────────
 
 # localhost.run — no account, no password, works on Windows/Linux/Mac
 TUNNEL_CMD = [
@@ -123,6 +132,48 @@ def update_gist(url):
         print(f"[GIST] ✗ Error: {e}")
 
 
+def get_local_ip():
+    try:
+        s = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
+        s.connect(("8.8.8.8", 80))
+        ip = s.getsockname()[0]
+        s.close()
+        return ip
+    except Exception:
+        try:
+            return socket.gethostbyname(socket.gethostname())
+        except Exception:
+            return "127.0.0.1"
+
+
+def update_gist_local_ip(ip):
+    if not GITHUB_TOKEN or not GIST_ID or "PASTE_YOUR" in GITHUB_TOKEN:
+        print("[GIST] Token/ID not set — skipping update")
+        return
+    url = f"http://{ip}:{SERVER_PORT}"
+    try:
+        body = json.dumps({"files": {GIST_FILENAME: {"content": url}}}).encode("utf-8")
+        req = urllib.request.Request(
+            f"https://api.github.com/gists/{GIST_ID}",
+            data=body,
+            method="PATCH",
+            headers={
+                "Authorization": f"token {GITHUB_TOKEN}",
+                "Accept": "application/vnd.github.v3+json",
+                "Content-Type": "application/json",
+            },
+        )
+        with urllib.request.urlopen(req, timeout=10) as resp:
+            if resp.status == 200:
+                print(f"[GIST] Updated → {url}")
+            else:
+                print(f"[GIST] Failed: {resp.status} — {resp.read()[:200]}")
+    except urllib.error.HTTPError as e:
+        print(f"[GIST] Failed: {e.code} — {e.reason}")
+    except Exception as e:
+        print(f"[GIST] Failed: {e}")
+
+
 def start_flask():
     script_dir = os.path.dirname(os.path.abspath(__file__))
     app_path   = os.path.join(script_dir, "app.py")
@@ -143,5 +194,10 @@ if __name__ == "__main__":
         print("[WARN] Could not capture tunnel URL. Flask starting anyway.")
     else:
         update_gist(tunnel_url)
+
+    local_ip = get_local_ip()
+    update_gist_local_ip(local_ip)
+    print(f"[SERVER] Running on http://{local_ip}:{SERVER_PORT}")
+    print(f"[SERVER] Pilot portal: http://{local_ip}:{SERVER_PORT}/pilot")
 
     start_flask()
