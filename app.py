@@ -14,6 +14,8 @@ fleet_data      = {}
 control_state   = {}
 flight_requests = {}
 command_queue   = {}
+arm_requests    = {}
+# { "Drone-1": { "status": "none|pending|approved|denied" } }
 
 GEOFENCE_ZONES = [
     {"id":"Z1","label":"Admin Block",
@@ -35,21 +37,23 @@ def save_state(force=False):
     _last_save = now
     try:
         with lock:
-            fleet_snap   = dict(fleet_data)
-            control_snap = {k: dict(v) for k, v in control_state.items()}
-            req_snap     = {k: dict(v) for k, v in flight_requests.items()}
+            fleet_snap    = dict(fleet_data)
+            control_snap  = {k: dict(v) for k, v in control_state.items()}
+            req_snap      = {k: dict(v) for k, v in flight_requests.items()}
+            arm_req_snap  = {k: dict(v) for k, v in arm_requests.items()}
         with geo_lock:
             geo_snap  = list(GEOFENCE_ZONES)
             zone_snap = _zone_counter
         with open(STATE_FILE, "w") as f:
             json.dump({"fleet":fleet_snap,"control":control_snap,
-                       "requests":req_snap,"geofence":geo_snap,
+                       "requests":req_snap,"arm_requests":arm_req_snap,
+                       "geofence":geo_snap,
                        "zone_counter":zone_snap}, f, indent=2)
     except Exception as e:
         print(f"[WARN] save_state: {e}")
 
 def load_state():
-    global fleet_data, control_state, flight_requests, GEOFENCE_ZONES, _zone_counter
+    global fleet_data, control_state, flight_requests, arm_requests, GEOFENCE_ZONES, _zone_counter
     if not os.path.exists(STATE_FILE):
         return
     try:
@@ -58,6 +62,7 @@ def load_state():
         fleet_data        = d.get("fleet",    {})
         control_state     = d.get("control",  {})
         flight_requests   = d.get("requests", {})
+        arm_requests      = d.get("arm_requests", {})
         GEOFENCE_ZONES[:] = d.get("geofence", GEOFENCE_ZONES)
         _zone_counter     = d.get("zone_counter", 4)
         print(f"[INFO] State restored: {len(fleet_data)} drone(s), {len(GEOFENCE_ZONES)} zone(s)")
@@ -133,6 +138,7 @@ def update():
     if not drone_id:
         return jsonify({"status":"no_id"}), 400
 
+    print(f"[UPDATE] {drone_id} â† telemetry from {request.remote_addr}")
     with lock:
         data["last_seen"] = time.time()
         fleet_data[drone_id] = data
@@ -155,6 +161,8 @@ def update():
             if drone_id in flight_requests:
                 flight_requests[drone_id]["status"] = "none"
             print(f"[RESET] {drone_id} disarmed â€” authorization reset")
+        if was_armed and not is_armed and drone_id in arm_requests:
+            arm_requests[drone_id]["status"] = "none"
         cs["_was_armed"] = is_armed
 
         # Geofence check (skip if GPS not fixed)
@@ -223,7 +231,50 @@ def get_pilot_requests():
         snapshot = dict(flight_requests)
     return jsonify(snapshot)
 
-# â”€â”€ Authority commands â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+# â”€â”€ Arm requests â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+@app.route("/drone/arm_request", methods=["POST","OPTIONS"])
+def drone_arm_request():
+    data     = request.get_json(force=True, silent=True) or {}
+    drone_id = data.get("drone_id", "").strip()
+    if not drone_id:
+        return jsonify({"status":"error","reason":"no drone_id"}), 400
+    with lock:
+        arm_requests[drone_id] = {"status":"pending"}
+    save_state(force=True)
+    print(f"[ARM REQUEST] {drone_id} â€” FC requesting arm authorization")
+    return jsonify({"status":"pending"})
+
+@app.route("/drone/poll_arm_permission/<drone_id>")
+def poll_arm_permission(drone_id):
+    with lock:
+        req = arm_requests.get(drone_id, {"status":"none"})
+    return jsonify(req)
+
+@app.route("/authority/approve_arm/<drone_id>", methods=["POST"])
+def authority_approve_arm(drone_id):
+    if not check_auth(): return auth_required()
+    with lock:
+        arm_requests[drone_id] = {"status":"approved"}
+    save_state(force=True)
+    print(f"[ARM APPROVED] {drone_id}")
+    return jsonify({"status":"approved"})
+
+@app.route("/authority/deny_arm/<drone_id>", methods=["POST"])
+def authority_deny_arm(drone_id):
+    if not check_auth(): return auth_required()
+    with lock:
+        arm_requests[drone_id] = {"status":"denied"}
+    save_state(force=True)
+    print(f"[ARM DENIED] {drone_id}")
+    return jsonify({"status":"denied"})
+
+@app.route("/authority/arm_requests")
+def get_arm_requests():
+    with lock:
+        snapshot = dict(arm_requests)
+    return jsonify(snapshot)
+
+# â”€â”€ Authority commands â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 @app.route("/authority/approve/<drone_id>", methods=["POST"])
 def authority_approve(drone_id):
     if not check_auth(): return auth_required()
