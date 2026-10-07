@@ -39,23 +39,18 @@ import socket
 import json
 import urllib.request
 import urllib.error
-import requests
 
 # Fix windows console unicode errors
 if sys.stdout.encoding != 'utf-8':
     sys.stdout.reconfigure(encoding='utf-8')
 
 # ── !! FILL THESE IN ONCE !! ─────────────────────────────────────────────────
-GITHUB_TOKEN = "PASTE_YOUR_NEW_TOKEN_HERE"
-GIST_ID      = "71775a92c0a67d79d6974ad1e7fd83e8"
-# ─────────────────────────────────────────────────────────────────────────────
-
-GIST_FILE = "drone_server.txt"
-
-# ── Local-IP Gist update (LAN discovery, no tunnel needed) ──────────────────
-GIST_FILENAME = "drone_server.txt"  # same gist/file as GIST_FILE above
+GIST_ID       = ""   # fill in your Gist ID
+GITHUB_TOKEN  = ""   # fill in ghp_xxxx token
+GIST_FILENAME = "drone_server.txt"
 SERVER_PORT   = 5000
 # ─────────────────────────────────────────────────────────────────────────────
+
 
 # localhost.run — no account, no password, works on Windows/Linux/Mac
 TUNNEL_CMD = [
@@ -98,38 +93,16 @@ def start_tunnel():
     return proc
 
 
-def update_gist(url):
-    if "PASTE_YOUR" in GITHUB_TOKEN:
-        print("[GIST] ⚠  GitHub token not set — skipping Gist update.")
-        print(f"[GIST]    Current tunnel URL: {url}")
+def save_tunnel_url(url):
+    """Stdlib-only local record of the public tunnel URL (no Gist push here
+    anymore — the Gist now always holds the LAN IP via update_gist() below,
+    which is what the drones actually read)."""
+    try:
         with open("current_tunnel_url.txt", "w") as f:
             f.write(url + "\n")
-        print("[GIST]    Saved to current_tunnel_url.txt")
-        return
-
-    headers = {
-        "Authorization": f"Bearer {GITHUB_TOKEN}",   # fine-grained tokens need Bearer
-        "Accept": "application/vnd.github.v3+json"
-    }
-    try:
-        r = requests.patch(
-            f"https://api.github.com/gists/{GIST_ID}",
-            json={"files": {GIST_FILE: {"content": url}}},
-            headers=headers,
-            timeout=10
-        )
-        if r.status_code == 200:
-            owner = r.json()["owner"]["login"]
-            perm  = f"https://gist.githubusercontent.com/{owner}/{GIST_ID}/raw/{GIST_FILE}"
-            print(f"[GIST] ✓ Published successfully.")
-            print(f"[GIST]   Permanent raw URL for ESP:")
-            print(f"[GIST]   {perm}")
-            with open("current_tunnel_url.txt", "w") as f:
-                f.write(f"Tunnel URL : {url}\nGist raw   : {perm}\n")
-        else:
-            print(f"[GIST] ✗ Failed: {r.status_code} — {r.text[:200]}")
+        print(f"[TUNNEL]   Saved to current_tunnel_url.txt: {url}")
     except Exception as e:
-        print(f"[GIST] ✗ Error: {e}")
+        print(f"[TUNNEL]   Could not save current_tunnel_url.txt: {e}")
 
 
 def get_local_ip():
@@ -146,9 +119,9 @@ def get_local_ip():
             return "127.0.0.1"
 
 
-def update_gist_local_ip(ip):
-    if not GITHUB_TOKEN or not GIST_ID or "PASTE_YOUR" in GITHUB_TOKEN:
-        print("[GIST] Token/ID not set — skipping update")
+def update_gist(ip):
+    if not GIST_ID or not GITHUB_TOKEN:
+        print("[GIST] ⚠  GIST_ID / GITHUB_TOKEN not set — skipping Gist update.")
         return
     url = f"http://{ip}:{SERVER_PORT}"
     try:
@@ -193,11 +166,12 @@ if __name__ == "__main__":
     if not tunnel_url:
         print("[WARN] Could not capture tunnel URL. Flask starting anyway.")
     else:
-        update_gist(tunnel_url)
+        save_tunnel_url(tunnel_url)
 
-    local_ip = get_local_ip()
-    update_gist_local_ip(local_ip)
-    print(f"[SERVER] Running on http://{local_ip}:{SERVER_PORT}")
-    print(f"[SERVER] Pilot portal: http://{local_ip}:{SERVER_PORT}/pilot")
+    ip = get_local_ip()
+    update_gist(ip)
+    print(f"[SERVER] Running on http://{ip}:{SERVER_PORT}")
+    print(f"[SERVER] Pilot portal: http://{ip}:{SERVER_PORT}/pilot")
+    print(f"[SERVER] ATC Dashboard: http://{ip}:{SERVER_PORT}")
 
     start_flask()

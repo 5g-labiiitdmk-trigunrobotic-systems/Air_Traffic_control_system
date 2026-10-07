@@ -10,7 +10,7 @@
 //      generator) into the empty drone2/mavlink/ folder and #include it.
 //   2. Confirm which UART the flight controller's telemetry port is wired
 //      to (assumed Serial2, RX2=16/TX2=17, 57600 baud below) and fix pins.
-//   3. Fill in WIFI_SSID/WIFI_PASS/SERVER_IP/DRONE_ID for your network.
+//   3. Fill in WIFI_SSID/WIFI_PASS/GIST_RAW_URL/DRONE_ID for your network.
 //   4. Confirm mavlink_msg_command_long_pack's target_system/target_component
 //      match your FC (assumed 1/1 below).
 // ─────────────────────────────────────────────────────────────────────────
@@ -20,9 +20,53 @@
 
 const char* WIFI_SSID   = "YOUR_WIFI_SSID";
 const char* WIFI_PASS   = "YOUR_WIFI_PASS";
-const char* SERVER_IP   = "192.168.1.100";     // Flask server IP
 const int   SERVER_PORT = 5000;
 const char* DRONE_ID    = "Drone-1";
+
+// ── Server discovery via GitHub Gist ────────────────────────────────────
+// 1. Get this from: https://gist.github.com
+//    Create a Gist with a file named "drone_server.txt" (start.py on the
+//    server laptop keeps its content updated with the server's current IP).
+// 2. Click "Raw" on that drone_server.txt file and copy the URL it gives
+//    you — paste it below as GIST_RAW_URL.
+// 3. This is the ONLY thing that needs changing per drone — every drone
+//    points at the SAME gist, so if the server's IP changes (new network,
+//    new hotspot), every drone picks up the new address automatically on
+//    its next boot. No reflashing needed for IP changes.
+//    Example: https://gist.githubusercontent.com/trigunrobotics/71775a92c0a67d79d6974ad1e7fd83e8/raw/drone_server.txt
+const char* GIST_RAW_URL = "PASTE_YOUR_GIST_RAW_URL_HERE";
+
+bool   serverURLFetched = false;  // true once fetchServerURL() succeeds
+String serverBase       = "";     // e.g. "http://192.168.1.42:5000" — filled at runtime
+String serverIP         = "";     // e.g. "192.168.1.42" — filled at runtime
+
+// Fetches GIST_RAW_URL, expects plain text like "http://192.168.1.42:5000".
+// Sets serverBase/serverIP/serverURLFetched on success. Non-fatal on failure
+// (caller retries) so a flaky Gist read never bricks the drone.
+bool fetchServerURL() {
+  HTTPClient http;
+  http.begin(GIST_RAW_URL);
+  int code = http.GET();
+  if (code == 200) {
+    String body = http.getString();
+    body.trim();
+    if (body.startsWith("http://") || body.startsWith("https://")) {
+      serverBase = body;
+      int hostStart = body.indexOf("://") + 3;
+      int colon = body.indexOf(':', hostStart);
+      int slash = body.indexOf('/', hostStart);
+      int hostEnd = (colon > 0) ? colon : (slash > 0 ? slash : body.length());
+      serverIP = body.substring(hostStart, hostEnd);
+      serverURLFetched = true;
+      Serial.println("[GIST] Server URL fetched: " + serverBase);
+      http.end();
+      return true;
+    }
+  }
+  Serial.println("[GIST] Fetch failed (HTTP " + String(code) + "), will retry");
+  http.end();
+  return false;
+}
 
 #define MAVLINK_SERIAL   Serial2
 #define MAVLINK_BAUD     57600
@@ -36,7 +80,7 @@ const unsigned long ARM_POLL_INTERVAL_MS = 500;
 const unsigned long ARM_WAIT_TIMEOUT_MS  = 30000;
 
 String armServerUrl(const char* path) {
-  return "http://" + String(SERVER_IP) + ":" + String(SERVER_PORT) + path;
+  return serverBase + path;
 }
 
 void sendArmRequest() {
@@ -180,6 +224,14 @@ void setup() {
     Serial.print(".");
   }
   Serial.println(WiFi.status() == WL_CONNECTED ? " connected" : " FAILED (continuing offline)");
+
+  if (WiFi.status() == WL_CONNECTED) {
+    Serial.println("[GIST] Fetching server URL...");
+    for (int attempt = 0; attempt < 10 && !serverURLFetched; attempt++) {
+      if (fetchServerURL()) break;
+      delay(1000);
+    }
+  }
   // ── end ARM-REQUEST/APPROVAL BLOCK setup ──
 
   pinMode(triggerPin, INPUT);
@@ -199,7 +251,15 @@ void setup() {
 }
 
 void loop() {
-  pollAndHandleArming(); // ARM-REQUEST/APPROVAL BLOCK — template, see notes above
+  if (!serverURLFetched) {
+    static unsigned long lastFetchAttempt = 0;
+    if (millis() - lastFetchAttempt >= 2000) { // retry every 2s, non-blocking
+      lastFetchAttempt = millis();
+      fetchServerURL();
+    }
+  } else {
+    pollAndHandleArming(); // ARM-REQUEST/APPROVAL BLOCK — template, see notes above
+  }
 
   if (newPulse) {
     newPulse = false;
